@@ -1,0 +1,14 @@
+# Fallback-Hotspot fuer Pynth, wird von deploy/install-wifi.sh installiert.
+# Logs: journalctl -u pynth-wifi -f
+[Unit]
+Description=Pynth WLAN-Waechter (Fallback-Hotspot)
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+ExecStart=/usr/local/sbin/pynth-wifi watch
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
