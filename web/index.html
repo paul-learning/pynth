@@ -57,6 +57,7 @@
   .slot.armed { background:var(--learn); color:#fff; border-color:var(--learn); animation:blink 1s infinite; }
   .slot.unset { color:var(--dim); border-style:dashed; }
   .row.inbank { outline:1px solid var(--acc); outline-offset:3px; border-radius:4px; }
+  .legend { color:var(--dim); font-size:12px; margin:8px 0 0; }
   .badge { font-size:10px; color:#111; background:var(--acc); border-radius:3px; padding:0 4px; margin-left:4px; }
 </style>
 </head>
@@ -76,6 +77,8 @@
   <h2>Controller-Knobs</h2>
   <div class="banks" id="banks"></div>
   <div class="knobs" id="knobs"></div>
+  <p class="legend">Orange umrandet mit K1–K8 = Regler, die die Knobs in der aktiven Bank steuern.
+     Orange Zahl statt „L“ = Regler ist direkt (ohne Bank) einem CC zugeordnet.</p>
   <details id="setup">
     <summary>Controller einrichten (Knobs/Pads anlernen, Mod-Rad)</summary>
     <p>"Einrichten" drücken, dann nacheinander Knob 1 bis 8 drehen und Pad 1 bis 4 drücken.
@@ -84,6 +87,9 @@
     <div class="slots" id="knobslots"></div>
     <div class="slots" id="padslots"></div>
     <div class="slots">Mod-Rad steuert: <select id="modwheel"></select></div>
+    <div class="slots">Knobs nach Bankwechsel: <select id="takeover">
+      <option value="jump">sofort greifen (voller Weg)</option>
+      <option value="pickup">erst abholen (Soft-Takeover, nichts springt)</option></select></div>
   </details>
 </section>
 <main id="groups"></main>
@@ -169,7 +175,7 @@ function build(state) {
 
 // --- Controller-Baenke ---
 const specLabel = s => { if (!s) return '–'; const [k, ch, n] = s.split(':');
-  return (k === 'cc' ? 'CC ' : 'Note ') + n + (ch === '*' ? '' : ` / K${ch}`); };
+  return ({cc: 'CC ', note: 'Note ', pc: 'PC '}[k] || k + ' ') + n + (ch === '*' ? '' : ` / K${ch}`); };
 function paramOptions(sel, current) {
   sel.innerHTML = '<option value="">(frei)</option>';
   let grp = null, og = null;
@@ -196,7 +202,7 @@ function buildCtrl() {
     const d = document.createElement('div'); d.className = 'knob';
     const picked = ctrl.picked[i];
     d.innerHTML = `<div class="top"><span>Knob ${i + 1} <small>${specLabel(ctrl.knobs[i])}</small></span>`
-      + (pid ? `<span class="pick ${picked ? 'ok' : 'no'}" title="${picked ? 'Knob hat den Wert abgeholt'
+      + (pid && ctrl.takeover === 'pickup' ? `<span class="pick ${picked ? 'ok' : 'no'}" title="${picked ? 'Knob hat den Wert abgeholt'
           : 'Soft-Takeover: Knob über den aktuellen Wert drehen, dann greift er'}">${picked ? '● greift' : '○ abholen'}</span>` : '')
       + `</div><select></select><div class="kv"></div>`;
     const sel = d.querySelector('select'); paramOptions(sel, pid);
@@ -221,6 +227,8 @@ function buildCtrl() {
   if (l) $('#setup').open = true;
   paramOptions($('#modwheel'), ctrl.modwheel.param);
   $('#modwheel').onchange = e => post('/api/ctrl/modwheel', {id: e.target.value || null});
+  $('#takeover').value = ctrl.takeover || 'jump';
+  $('#takeover').onchange = e => post('/api/ctrl/takeover', {mode: e.target.value});
   // aktive Bank in den Bereichen markieren
   for (const [id, e] of Object.entries(ui)) {
     const k = bank.params.indexOf(id), row = e.learn.parentElement;

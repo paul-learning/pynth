@@ -101,11 +101,20 @@ Die 4 Pads schalten die Bank um, jede Bank belegt die 8 Knobs neu, also 32 Regle
 | 3 | LFO + Noise | Rate, Tiefe, Welle, Ziel, Noise-Farbe, Noise-Pegel, –, – |
 | 4 | Effekte + Master | Delay Mix, Delay Zeit, Delay Feedback, –, Hall Mix, Hall Größe, –, Master |
 
-* **Einrichten**: Web-UI → "Controller einrichten" → **Einrichten**, dann Knob 1 bis 8 drehen
-  und Pad 1 bis 4 drücken. Funktioniert egal ob der Controller CCs oder Noten sendet.
+* **Einrichten**: Web-UI → "Controller einrichten" → **Einrichten**, dann Knob 1 bis 8 jeweils
+  ein Stück drehen und Pad 1 bis 4 drücken. Funktioniert egal ob der Controller CCs, Noten
+  oder Program Changes sendet. Solange die Pads nicht eingerichtet sind, spielen sie einfach Töne.
+  Leicht zitternde Potis werden beim Anlernen ignoriert (ein Knob braucht ≥ 4 Schritte Bewegung,
+  ein Pad als CC einen Sprung auf ≥ 64, schon belegte Knobs zählen nicht als Pad).
 * **Belegung ändern**: im Kasten "Controller-Knobs" pro Knob einen Regler auswählen.
-* **Soft-Takeover**: Nach Bank- oder Preset-Wechsel greift ein Knob erst, wenn er den
-  aktuellen Wert überstreicht ("○ abholen" → "● greift"). Dadurch springt nichts.
+* **Knobs nach Bankwechsel** (umstellbar unter "Controller einrichten"):
+  *sofort greifen* (Standard): der Knob setzt direkt seinen Wert, voller Weg 0–100 %, kann
+  nach einem Bankwechsel springen. *Erst abholen* (Soft-Takeover): der Knob greift erst, wenn
+  er den aktuellen Wert überstreicht ("○ abholen" → "● greift"), dadurch springt nichts.
+* Ein Eingang ist immer nur einmal belegt: wird ein Knob als Controller-Knob gelernt, fällt
+  seine direkte "L"-Zuordnung weg und umgekehrt.
+* **Farben**: orange umrandet mit K1–K8 = Regler der aktiven Bank. Orange Zahl statt "L" =
+  Regler direkt (ohne Bank) einem CC zugeordnet.
 * **Mod-Rad** (CC 1) steuert standardmäßig die LFO-Tiefe, umstellbar in der Web-UI.
 * Gespeichert in `controller.json` (Nutzerdaten, nicht im Repo).
 * Eingehende MIDI-Nachrichten anzeigen: `~/pynth_venv/bin/python -m pynth --midi-monitor`
