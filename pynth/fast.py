@@ -69,6 +69,8 @@ def _load():
         lib.render_voices.restype = None
         lib.svf_lowpass.argtypes = [_I, _P, _P, _P, _D, _D, _P]
         lib.svf_lowpass.restype = None
+        lib.ladder_lowpass.argtypes = [_I, _P, _P, _P, _D, _D, _D, _D, _D, _P]
+        lib.ladder_lowpass.restype = None
         lib.feedback_line.argtypes = [_I, _P, _P, _P, _P, _I, _P, _I, _D]
         lib.feedback_line.restype = None
         return lib

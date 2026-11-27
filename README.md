@@ -15,7 +15,7 @@ Polyphoner Subtraktiv-Synth in Python (numpy/scipy), spielbar per MIDI-Keyboard
                        │ liest pro Block einen Schnappschuss
                        ▼
  engine.py:  8 Voices × (Osc1 + Osc2 + Noise white/pink) × ADSR × Velocity
-             → Biquad-Tiefpass (Cutoff + LFO, 256er-Teilblöcke)
+             → 4-Pol-Ladder-Tiefpass mit Sättigung (Cutoff, Resonanz, Drive, LFO pro Sample)
              → Master (gerampt) → Delay → Hall → tanh-Limiter → sounddevice/ALSA
 ```
 
@@ -87,11 +87,15 @@ Autostart: siehe `deploy/pynth.service` (Kommentar oben in der Datei, startet mi
 Die Schleifen pro Sample (Oszillatoren, Hüllkurven, Filter, Delay, Hall) laufen in einem
 kleinen C-Kern (`pynth/_kernel.c`). Pynth übersetzt ihn beim ersten Start selbst mit `cc`
 nach `pynth/_build/` (dauert ein paar Sekunden). Fehlt der Compiler (`sudo apt install gcc`),
-rechnet die Engine wie früher mit numpy, klingt gleich, braucht aber ca. 3× so viel CPU.
+rechnet die Engine mit numpy weiter, braucht aber ca. 3× so viel CPU und hat statt des
+Ladders nur einen 12-dB-Biquad mit Sättigung davor.
 Vergleichen: `PYNTH_NO_C=1 python -m pynth --bench`.
 
-Das Filter ist im C-Kern ein State-Variable-Filter mit Cutoff pro Sample: gleicher Klang
-wie der Biquad, aber kein Knacksen mehr bei hoher LFO-Tiefe. Square- und Saw-LFO werden an
+Das Filter ist ein 4-Pol-Ladder (24 dB/Oktave, Moog-Stil) als Zero-Delay-Feedback-Struktur
+mit Cutoff pro Sample, dadurch kein Knacksen bei hoher LFO-Tiefe. Eine tanh-Sättigung in
+der Rückkopplung hält die Resonanz im Zaum: ganz aufgedreht schwingt das Filter leise selbst
+(ein Sinuston auf der Cutoff-Frequenz), statt zu übersteuern. **Drive** (0–1, bis +24 dB)
+fährt das Signal stärker in die Sättigung: wärmer, dichter, etwas lauter. Square- und Saw-LFO werden an
 den Sprüngen ~2 ms geglättet.
 
 Gegen Aussetzer zusätzlich:
