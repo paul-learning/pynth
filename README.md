@@ -101,6 +101,17 @@ wird beim Start automatisch geleert, eigene Änderungen bleiben):
   Dreht man stattdessen einen Regler, der kein Bank-Knob ist (z.B. den großen Drehregler),
   gilt die Zuordnung in allen Bänken (z.B. Master-Lautstärke). Rechtsklick auf L entfernt.
   Alternativ im Kasten "Controller-Knobs" pro Knob einen Regler auswählen.
+* **Weiter-Taste**: jeder Druck schaltet zur nächsten Bank (1 → 2 → 3 → 4 → 1). Standard sind
+  Note 0 und CC 0 auf jedem Kanal, weil beim Graphite M25 alle vier Pads dasselbe senden
+  (Note 0, im CC-Modus CC 0). Jeder Druck zählt einmal, egal ob das Pad beim Loslassen
+  "aus" sendet oder pro Druck zwischen an/aus wechselt (Toggle). CC 0 direkt nach einem
+  Program Change (PRESET-Taste am M25) wird ignoriert. Unter "Controller einrichten"
+  anlernbar, Rechtsklick schaltet sie ab. Fest angelernte Pads/Knobs haben Vorrang, feste
+  Bank-Tasten (Pads oder z.B. Stop/Play/Record) gehen weiterhin.
+* **Controller-Presets**: Viele Controller (auch der M25) senden je nach Preset andere CCs/Noten.
+  Die Knobs/Pads gelten für das Preset, auf dem sie angelernt wurden. Nach einem Preset-Wechsel
+  am Controller "Einrichten" neu durchlaufen. Dreht man bei "L" einen Knob, der kein Bank-Knob
+  ist, zeigt die Web-UI einen Hinweis: die Zuordnung gilt dann in allen Bänken.
 * **MIDI-Monitor**: unter "Controller einrichten" stehen die letzten 40 eingehenden Nachrichten
   (mit Kanal 1–16). Damit sieht man, was Pads und Tasten wirklich senden.
 * **Einrichten**: Web-UI → "Controller einrichten" → **Einrichten**, dann Knob 1 bis 8 jeweils
