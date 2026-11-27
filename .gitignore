@@ -1,0 +1,12 @@
+# Nutzerdaten auf dem Pi (nicht ins Repo)
+state.json
+midi_map.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Renders / Demos
+*.wav

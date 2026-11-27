@@ -1,0 +1,46 @@
+{
+  "name": "Fat Bass",
+  "osc1": {
+    "wave": "saw",
+    "octave": -1
+  },
+  "osc2": {
+    "wave": "square",
+    "octave": -2,
+    "detune": 3.0
+  },
+  "noise": {
+    "type": "white"
+  },
+  "mix": {
+    "osc1": 0.6,
+    "osc2": 0.5,
+    "noise": 0
+  },
+  "master": {
+    "volume": 0.7
+  },
+  "env": {
+    "attack": 0.003,
+    "decay": 0.3,
+    "sustain": 0.6,
+    "release": 0.15
+  },
+  "filter": {
+    "cutoff": 600.0,
+    "resonance": 0.45
+  },
+  "lfo": {
+    "wave": "sine",
+    "target": "filter",
+    "rate": 2.0,
+    "depth": 0
+  },
+  "fx": {
+    "delay_mix": 0,
+    "delay_time": 0.35,
+    "delay_feedback": 0.35,
+    "reverb_mix": 0,
+    "reverb_size": 0.6
+  }
+}

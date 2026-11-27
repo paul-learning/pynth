@@ -1,0 +1,139 @@
+"""MIDI-Eingang (USB, BLE, alles was ALSA/rtmidi sieht) mit CC-Mapping + MIDI-Learn.
+
+- Neue Geraete werden alle paar Sekunden automatisch erkannt (Hotplug).
+- Mapping liegt in midi_map.json: {"<kanal>:<cc>": "<param-id>"}, Kanal 1-16.
+- MIDI-Learn: In der Web-UI "L" am Regler druecken, dann Knopf am Controller drehen.
+- CC 64 = Sustain-Pedal, CC 123 = All Notes Off sind fest belegt.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import threading
+from pathlib import Path
+
+from .params import RENAMED
+
+log = logging.getLogger("pynth.midi")
+
+IGNORE_PORTS = ("Midi Through", "RtMidi")
+
+
+class MidiManager:
+    def __init__(self, engine, params, map_file: Path):
+        self.engine = engine
+        self.params = params
+        self.map_file = Path(map_file)
+        self.mapping: dict[str, str] = {}
+        self.learn_target: str | None = None
+        self.ports: dict[str, object] = {}
+        self.last_message = ""
+        self._stop = threading.Event()
+        self._load_map()
+
+    # ----------------------------- Mapping -----------------------------
+    def _load_map(self):
+        try:
+            data = json.loads(self.map_file.read_text())
+            data = {k: RENAMED.get(v, v) for k, v in data.items()}   # alte IDs uebernehmen
+            self.mapping = {k: v for k, v in data.items() if v in self.params.params}
+            if self.mapping != json.loads(self.map_file.read_text()):
+                self._save_map()
+        except (OSError, ValueError):
+            self.mapping = {}
+
+    def _save_map(self):
+        self.map_file.write_text(json.dumps(self.mapping, indent=2, sort_keys=True) + "\n")
+
+    def learn(self, pid: str | None):
+        self.learn_target = pid if pid in self.params.params else None
+        self._announce()
+
+    def unmap(self, pid: str):
+        self.mapping = {k: v for k, v in self.mapping.items() if v != pid}
+        self._save_map()
+        self._announce()
+
+    def info(self) -> dict:
+        return {"ports": list(self.ports), "map": self.mapping,
+                "learn": self.learn_target, "last": self.last_message}
+
+    def _announce(self):
+        self.params.broadcast("midi", self.info())
+
+    # ----------------------------- Eingang -----------------------------
+    def _on_message(self, msg):
+        try:
+            t = msg.type
+            if t == "note_on":
+                self.engine.note_on(msg.note, msg.velocity)
+            elif t == "note_off":
+                self.engine.note_off(msg.note)
+            elif t == "pitchwheel":
+                self.engine.pitch_bend(msg.pitch / 8192.0)
+            elif t == "control_change":
+                key = f"{msg.channel + 1}:{msg.control}"
+                self.last_message = f"CC {msg.control} (Kanal {msg.channel + 1}) = {msg.value}"
+                if self.learn_target:
+                    self.mapping = {k: v for k, v in self.mapping.items() if v != self.learn_target}
+                    self.mapping[key] = self.learn_target
+                    log.info("MIDI-Learn: %s -> %s", key, self.learn_target)
+                    self.learn_target = None
+                    self._save_map()
+                    self._announce()
+                if key in self.mapping:
+                    self.params.set_norm(self.mapping[key], msg.value / 127.0, source="midi")
+                elif msg.control == 64:
+                    self.engine.sustain_pedal(msg.value >= 64)
+                elif msg.control == 123:
+                    self.engine.panic()
+        except Exception:                       # ein kaputtes Paket darf nichts abschiessen
+            log.exception("MIDI-Fehler bei %s", msg)
+
+    def _scan(self, mido):
+        try:
+            names = set(mido.get_input_names())
+        except Exception as e:
+            log.warning("MIDI-Scan fehlgeschlagen: %s", e)
+            return
+        wanted = {n for n in names if not any(n.startswith(i) for i in IGNORE_PORTS)}
+        changed = False
+        for name in list(self.ports):
+            if name not in wanted:
+                try:
+                    self.ports.pop(name).close()
+                except Exception:
+                    pass
+                log.info("MIDI getrennt: %s", name)
+                changed = True
+        for name in wanted - set(self.ports):
+            try:
+                self.ports[name] = mido.open_input(name, callback=self._on_message)
+                log.info("MIDI verbunden: %s", name)
+                changed = True
+            except Exception as e:
+                log.warning("Kann %s nicht oeffnen: %s", name, e)
+        if changed:
+            self._announce()
+
+    def start(self, interval: float = 3.0):
+        try:
+            import mido
+        except ImportError:
+            log.warning("mido nicht installiert - kein MIDI")
+            return
+
+        def loop():
+            while not self._stop.is_set():
+                self._scan(mido)
+                self._stop.wait(interval)
+
+        threading.Thread(target=loop, name="midi-scan", daemon=True).start()
+
+    def stop(self):
+        self._stop.set()
+        for p in self.ports.values():
+            try:
+                p.close()
+            except Exception:
+                pass

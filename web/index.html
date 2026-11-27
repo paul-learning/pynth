@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pynth</title>
+<style>
+  :root { --bg:#14161a; --card:#1e2127; --line:#2c3038; --fg:#e6e8eb; --dim:#8a919c; --acc:#f0a03c; --learn:#e5484d; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.4 system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+  header { position:sticky; top:0; z-index:5; display:flex; flex-wrap:wrap; gap:8px; align-items:center;
+           padding:10px 14px; background:#0e1013; border-bottom:1px solid var(--line); }
+  header h1 { font-size:18px; margin:0 10px 0 0; letter-spacing:.05em; }
+  select, input[type=text], button { font:inherit; color:var(--fg); background:var(--card);
+           border:1px solid var(--line); border-radius:6px; padding:6px 10px; }
+  button { cursor:pointer; } button:hover { border-color:var(--acc); }
+  #status { margin-left:auto; color:var(--dim); font-size:12px; text-align:right; }
+  main { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:12px; padding:14px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
+  .card h2 { font-size:13px; text-transform:uppercase; letter-spacing:.08em; color:var(--acc); margin:0 0 10px; }
+  .row { display:grid; grid-template-columns:96px 1fr 64px 26px; gap:8px; align-items:center; margin:7px 0; }
+  .row.choice { grid-template-columns:96px 1fr 26px; }
+  .row.choice .val { display:none; }
+  .row label { color:var(--dim); font-size:12px; }
+  .row .val { font-variant-numeric:tabular-nums; font-size:12px; text-align:right; }
+  input[type=range] { width:100%; accent-color:var(--acc); }
+  .seg { display:flex; gap:3px; flex-wrap:wrap; }
+  .seg button { padding:3px 8px; font-size:12px; }
+  .seg button.on { background:var(--acc); color:#111; border-color:var(--acc); }
+  .learn { padding:2px 0; width:26px; font-size:11px; color:var(--dim); }
+  .learn.mapped { color:var(--acc); border-color:var(--acc); }
+  .learn.armed { background:var(--learn); color:#fff; border-color:var(--learn); animation:blink 1s infinite; }
+  @keyframes blink { 50% { opacity:.5; } }
+  #kbwrap { padding:0 14px 20px; }
+  #kbbar { display:flex; gap:8px; align-items:center; margin-bottom:8px; color:var(--dim); font-size:12px; }
+  #kb { position:relative; height:150px; user-select:none; touch-action:none; }
+  .key { position:absolute; top:0; border:1px solid #000; border-radius:0 0 5px 5px; }
+  .key.w { background:#eee; height:150px; z-index:1; }
+  .key.b { background:#222; height:92px; z-index:2; }
+  .key.down { background:var(--acc) !important; }
+  #midiinfo { color:var(--dim); font-size:12px; padding:0 14px 10px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>PYNTH</h1>
+  <select id="presets" title="Preset laden"></select>
+  <input type="text" id="pname" placeholder="Preset-Name" size="14">
+  <button id="save">Speichern</button>
+  <button id="del" title="Ausgewähltes Preset löschen">Löschen</button>
+  <button id="panic" title="Alle Noten aus">Panic</button>
+  <div id="status">verbinde ...</div>
+</header>
+<div id="midiinfo"></div>
+<main id="groups"></main>
+<div id="kbwrap">
+  <div id="kbbar">
+    <button id="octdn">Okt -</button><span id="octlbl"></span><button id="octup">Okt +</button>
+    <span>Tastatur: A W S E D F T G Z H U J K O L</span>
+  </div>
+  <div id="kb"></div>
+</div>
+<script>
+const $ = s => document.querySelector(s);
+let schema = {}, values = {}, midi = {map:{}, learn:null, ports:[]};
+const ui = {};   // id -> {slider, val, seg, learn}
+
+// --- Umrechnung (identisch zu params.py) ---
+function fromNorm(p, x) {
+  if (p.choices.length) return p.choices[Math.min(Math.floor(x * p.choices.length), p.choices.length - 1)];
+  let v = p.curve === 'exp' ? p.min * Math.pow(p.max / p.min, x) : p.min + x * (p.max - p.min);
+  if (p.step) v = Math.round(v / p.step) * p.step;
+  return v;
+}
+function toNorm(p, v) {
+  return p.curve === 'exp' ? Math.log(v / p.min) / Math.log(p.max / p.min) : (v - p.min) / (p.max - p.min);
+}
+function fmt(p, v) {
+  if (p.choices.length) return v;
+  let s = Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(p.step ? 0 : 2);
+  if (p.unit === 'Hz' && v >= 1000) return (v / 1000).toFixed(2) + ' kHz';
+  return s + (p.unit ? ' ' + p.unit : '');
+}
+
+const post = (url, body) => fetch(url, {method:'POST', headers:{'Content-Type':'application/json'},
+                                        body: JSON.stringify(body || {})}).then(r => r.json());
+
+// Slider-Updates drosseln (max ~30/s pro Regler), letzter Wert gewinnt immer
+const pending = {}, timers = {};
+function sendParam(id, value) {
+  pending[id] = value;
+  if (timers[id]) return;
+  timers[id] = setTimeout(() => { timers[id] = null; post('/api/param', {id, value: pending[id]}); }, 33);
+}
+
+function build(state) {
+  const main = $('#groups'); main.innerHTML = '';
+  const cards = {};
+  for (const p of state.schema) {
+    schema[p.id] = p;
+    if (!cards[p.group]) {
+      const c = document.createElement('section'); c.className = 'card';
+      c.innerHTML = `<h2>${state.groups[p.group] || p.group}</h2>`;
+      main.appendChild(c); cards[p.group] = c;
+    }
+    const row = document.createElement('div'); row.className = p.choices.length ? 'row choice' : 'row';
+    row.innerHTML = `<label>${p.label}</label><div class="ctl"></div><span class="val"></span>`;
+    const learn = document.createElement('button'); learn.className = 'learn'; learn.textContent = 'L';
+    learn.title = 'MIDI-Learn: klicken, dann Knopf am Controller bewegen. Rechtsklick = Zuordnung löschen';
+    learn.onclick = () => post('/api/midi/learn', {id: midi.learn === p.id ? null : p.id});
+    learn.oncontextmenu = e => { e.preventDefault(); post('/api/midi/unmap', {id: p.id}); };
+    row.appendChild(learn);
+    const ctl = row.querySelector('.ctl'), entry = {val: row.querySelector('.val'), learn};
+    if (p.choices.length) {
+      const seg = document.createElement('div'); seg.className = 'seg';
+      for (const c of p.choices) {
+        const b = document.createElement('button'); b.textContent = c; b.dataset.v = c;
+        b.onclick = () => { values[p.id] = c; refresh(p.id); sendParam(p.id, c); };
+        seg.appendChild(b);
+      }
+      ctl.appendChild(seg); entry.seg = seg;
+    } else {
+      const s = document.createElement('input'); s.type = 'range'; s.min = 0; s.max = 1000;
+      s.oninput = () => { const v = fromNorm(p, s.value / 1000); values[p.id] = v;
+                          entry.val.textContent = fmt(p, v); sendParam(p.id, v); };
+      s.ondblclick = () => { values[p.id] = p.default; refresh(p.id); sendParam(p.id, p.default); };
+      ctl.appendChild(s); entry.slider = s;
+    }
+    ui[p.id] = entry;
+    cards[p.group].appendChild(row);
+  }
+  for (const id in values) refresh(id);
+}
+
+function refresh(id) {
+  const p = schema[id], e = ui[id], v = values[id];
+  if (!p || !e) return;
+  e.val.textContent = fmt(p, v);
+  if (e.slider && document.activeElement !== e.slider) e.slider.value = Math.round(toNorm(p, v) * 1000);
+  if (e.seg) for (const b of e.seg.children) b.classList.toggle('on', b.dataset.v === v);
+}
+
+function refreshMidi() {
+  const byParam = {};
+  for (const [k, pid] of Object.entries(midi.map || {})) byParam[pid] = k;
+  for (const [id, e] of Object.entries(ui)) {
+    const k = byParam[id];
+    e.learn.classList.toggle('mapped', !!k); e.learn.classList.toggle('armed', midi.learn === id);
+    e.learn.textContent = k ? k.split(':')[1] : 'L';
+    e.learn.title = k ? `CC ${k.split(':')[1]} (Kanal ${k.split(':')[0]}) - Rechtsklick löscht` : 'MIDI-Learn';
+  }
+  $('#midiinfo').textContent = 'MIDI: ' + (midi.ports && midi.ports.length ? midi.ports.join(', ') : 'kein Gerät')
+    + (midi.learn ? `  |  Learn aktiv fuer "${schema[midi.learn].label}" - Knopf bewegen ...` : '')
+    + (midi.last ? `  |  zuletzt: ${midi.last}` : '');
+}
+
+function setPresets(list, current) {
+  const sel = $('#presets'); sel.innerHTML = '';
+  const cur = document.createElement('option'); cur.value = ''; cur.textContent = `Aktuell: ${current}`;
+  sel.appendChild(cur);
+  for (const n of list) { const o = document.createElement('option'); o.value = o.textContent = n; sel.appendChild(o); }
+  $('#pname').value = current;
+}
+
+function setStatus(s) {
+  $('#status').innerHTML = `CPU ${(s.load * 100).toFixed(0)}% &middot; Stimmen ${s.voices} &middot; Peak ${s.peak.toFixed(2)}`
+    + ` &middot; Underruns ${s.underruns}<br>${s.audio} &middot; ${s.blocksize} Samples (${s.latency_ms} ms)`;
+}
+
+async function init() {
+  const st = await (await fetch('/api/state')).json();
+  values = st.values; if (st.midi) midi = st.midi;
+  build(st); setPresets(st.presets, st.preset); setStatus(st.status); refreshMidi();
+  const es = new EventSource('/api/events');
+  es.addEventListener('param', e => { const d = JSON.parse(e.data);
+    if (d.source === 'web' && timers[d.id]) return; values[d.id] = d.value; refresh(d.id); });
+  es.addEventListener('values', e => { const d = JSON.parse(e.data); values = d.values;
+    for (const id in values) refresh(id); setPresets([...$('#presets').options].slice(1).map(o => o.value), d.preset); });
+  es.addEventListener('presets', e => { const d = JSON.parse(e.data); setPresets(d.presets, d.preset); });
+  es.addEventListener('midi', e => { midi = JSON.parse(e.data); refreshMidi(); });
+  es.addEventListener('status', e => setStatus(JSON.parse(e.data)));
+  es.onerror = () => { $('#status').textContent = 'Verbindung weg - versuche neu ...'; };
+}
+
+$('#presets').onchange = e => { if (e.target.value) post('/api/preset/load', {name: e.target.value}); };
+$('#save').onclick = () => post('/api/preset/save', {name: $('#pname').value || 'Unbenannt'});
+$('#del').onclick = () => { const n = $('#presets').value || $('#pname').value; if (n) post('/api/preset/delete', {name: n}); };
+$('#panic').onclick = () => post('/api/panic');
+
+// --- Test-Klaviatur (Maus/Touch + Computertastatur) ---
+let octave = 4; const held = new Set();
+const noteOn = n => { if (held.has(n)) return; held.add(n); post('/api/note', {note:n, velocity:100, on:true});
+                      const k = document.querySelector(`.key[data-n="${n}"]`); if (k) k.classList.add('down'); };
+const noteOff = n => { if (!held.delete(n)) return; post('/api/note', {note:n, on:false});
+                       const k = document.querySelector(`.key[data-n="${n}"]`); if (k) k.classList.remove('down'); };
+function buildKb() {
+  const kb = $('#kb'); kb.innerHTML = ''; $('#octlbl').textContent = 'C' + octave;
+  const start = 12 * (octave + 1), whites = [0,2,4,5,7,9,11], W = 100 / 15;
+  let wi = 0;
+  for (let i = 0; i < 25; i++) {
+    const n = start + i, pc = i % 12, white = whites.includes(pc);
+    const k = document.createElement('div'); k.className = 'key ' + (white ? 'w' : 'b'); k.dataset.n = n;
+    if (white) { k.style.left = (wi * W) + '%'; k.style.width = W + '%'; wi++; }
+    else { k.style.left = (wi * W - W * 0.3) + '%'; k.style.width = (W * 0.6) + '%'; }
+    k.onpointerdown = e => { k.setPointerCapture(e.pointerId); noteOn(n); };
+    k.onpointerup = k.onpointercancel = () => noteOff(n);
+    kb.appendChild(k);
+  }
+}
+const keymap = 'awsedftgzhujkol';   // deutsches Layout (Z statt Y)
+document.addEventListener('keydown', e => {
+  if (e.repeat || e.target.tagName === 'INPUT' && e.target.type === 'text') return;
+  const i = keymap.indexOf(e.key.toLowerCase()); if (i >= 0) noteOn(12 * (octave + 1) + i);
+});
+document.addEventListener('keyup', e => {
+  const i = keymap.indexOf(e.key.toLowerCase()); if (i >= 0) noteOff(12 * (octave + 1) + i);
+});
+$('#octdn').onclick = () => { if (octave > 1) { octave--; buildKb(); } };
+$('#octup').onclick = () => { if (octave < 7) { octave++; buildKb(); } };
+buildKb(); init();
+</script>
+</body>
+</html>

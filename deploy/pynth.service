@@ -1,0 +1,20 @@
+# Autostart auf dem Pi:
+#   sudo cp ~/pynth/deploy/pynth.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now pynth
+#   Logs: journalctl -u pynth -f
+[Unit]
+Description=Pynth Synthesizer
+After=network-online.target sound.target bluetooth.target
+
+[Service]
+User=pynth
+Group=audio
+WorkingDirectory=/home/pynth/pynth
+ExecStart=/home/pynth/pynth_venv/bin/python -m pynth --blocksize 1024
+Restart=on-failure
+RestartSec=3
+Nice=-10
+LimitRTPRIO=95
+
+[Install]
+WantedBy=multi-user.target
