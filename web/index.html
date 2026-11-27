@@ -327,7 +327,9 @@ async function init() {
     if (midi.log.length > 40) midi.log.shift();
     const el = $('#midilog'); el.textContent = midi.log.join('\n'); el.scrollTop = el.scrollHeight; });
   es.addEventListener('status', e => setStatus(JSON.parse(e.data)));
-  es.onerror = () => { $('#status').textContent = 'Verbindung weg - versuche neu ...'; };
+  let lost = false;
+  es.onerror = () => { lost = true; $('#status').textContent = 'Verbindung weg - versuche neu ...'; };
+  es.onopen = () => { if (lost) location.reload(); };   // z.B. nach Neustart/Update: alles frisch laden
 }
 
 $('#presets').onchange = e => { if (e.target.value) post('/api/preset/load', {name: e.target.value}); };
