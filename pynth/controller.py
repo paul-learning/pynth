@@ -26,6 +26,7 @@ PICKUP_TOLERANCE = 3 / 127      # so nah am Wert gilt ein Knob als "abgeholt"
 LEARN_MIN_MOVE = 4              # Knob-Learn: erst nach so vielen Schritten Bewegung (Potis zittern um 1-2)
 TAKEOVER_MODES = ("jump", "pickup")
 RELEASE_WINDOW = 0.8            # Weiter-Taste: Loslassen so kurz nach dem Druecken = kein neuer Druck
+TRANSPORT = ("record", "stop", "play")     # Looper-Tasten
 PC_CC_GAP = 0.3                 # CC 0 direkt nach Program Change ist Bank-Select des Presets, kein Pad
 
 DEFAULT_CONFIG = {
@@ -37,6 +38,8 @@ DEFAULT_CONFIG = {
     # Weiter-Taste: jeder Druck schaltet zur naechsten Bank (1 -> 2 -> 3 -> 4 -> 1).
     # Fuer Controller, deren Pads alle dasselbe senden (Graphite M25: Note 0 bzw. CC 0).
     "next_bank": ["note:*:0", "cc:*:0"],
+    # Looper-Tasten Record, Stop, Play (anlernbar). MMC (Sysex) geht immer, ohne Anlernen.
+    "transport": [None] * len(TRANSPORT),
     # "jump": Knob setzt sofort seinen Wert (voller Weg, kann nach Bankwechsel springen)
     # "pickup": Soft-Takeover, Knob greift erst, wenn er den aktuellen Wert ueberstreicht
     "takeover": "jump",
@@ -80,6 +83,7 @@ class Controller:
         self._nb_state: dict[str, dict] = {}                 # Weiter-Taste: letzter Zustand je Eingang
         self._last_pc = 0.0
         self.on_learned = None                               # Callback(spec): z.B. alte Direkt-Belegung loeschen
+        self.on_transport = None                             # Callback("record"|"stop"|"play"): Looper
         self._load()
 
     # ----------------------------- Datei -----------------------------
@@ -92,7 +96,7 @@ class Controller:
             log.warning("%s nicht lesbar (%s), nutze Defaults", self.file, e)
             return
         cfg = self.config
-        for key, n in (("knobs", N_KNOBS), ("pads", N_PADS)):
+        for key, n in (("knobs", N_KNOBS), ("pads", N_PADS), ("transport", len(TRANSPORT))):
             vals = list(data.get(key) or [])[:n]
             cfg[key] = vals + [None] * (n - len(vals))
         nb = data.get("next_bank")
@@ -133,6 +137,7 @@ class Controller:
                 "knobs": self.config["knobs"], "pads": self.config["pads"],
                 "modwheel": self.config["modwheel"], "picked": list(self._picked),
                 "next_bank": self.config["next_bank"],
+                "transport": self.config["transport"],
                 "takeover": self.config["takeover"],
                 "learn": list(self.learn_slot) if self.learn_slot else None,
                 "wizard": self.wizard}
@@ -150,6 +155,8 @@ class Controller:
     def learn(self, slot: str | None, index: int = 0, wizard: bool = False):
         if slot == "next":
             self.learn_slot, self.wizard = ("next", 0), False
+        elif slot == "transport" and 0 <= index < len(TRANSPORT):
+            self.learn_slot, self.wizard = ("transport", index), False
         elif slot in ("knob", "pad") and 0 <= index < (N_KNOBS if slot == "knob" else N_PADS):
             self.learn_slot = (slot, index)
             self.wizard = wizard
@@ -167,12 +174,12 @@ class Controller:
             self._announce()
 
     def uses_input(self, spec: str) -> bool:
-        return spec in self.config["knobs"] or spec in self.config["pads"]
+        return any(spec in self.config[k] for k in ("knobs", "pads", "transport"))
 
     def forget_input(self, spec: str):
         """Eingang wurde anderswo (MIDI-Learn am Regler) belegt -> hier freigeben."""
         changed = False
-        for key in ("knobs", "pads"):
+        for key in ("knobs", "pads", "transport"):
             lst = self.config[key]
             for j, s in enumerate(lst):
                 if s == spec:
@@ -187,8 +194,8 @@ class Controller:
             self._save()
             self._announce()
             return
-        key = "knobs" if slot == "knob" else "pads"
-        if 0 <= index < len(self.config[key]):
+        key = {"knob": "knobs", "pad": "pads", "transport": "transport"}.get(slot)
+        if key and 0 <= index < len(self.config[key]):
             self.config[key][index] = None
             self._save()
             self._announce()
@@ -229,7 +236,7 @@ class Controller:
         if self.wizard and spec in self._wizard_done:
             return      # z.B. Pad loest doppelt aus oder Knob 1 wird weitergedreht: nicht ins naechste Feld
         self._wizard_done.add(spec)
-        for key in ("knobs", "pads"):        # gleicher Eingang darf nur einmal belegt sein
+        for key in ("knobs", "pads", "transport"):   # gleicher Eingang darf nur einmal belegt sein
             lst = self.config[key]
             for j, s in enumerate(lst):
                 if s == spec:
@@ -238,7 +245,7 @@ class Controller:
             self.config["next_bank"] = [spec]
         else:
             self.config["next_bank"] = [x for x in self.config["next_bank"] if x != spec]
-            self.config["knobs" if slot == "knob" else "pads"][i] = spec
+            self.config[{"knob": "knobs", "pad": "pads"}.get(slot, "transport")][i] = spec
         self._learn_seen = {}
         if self.on_learned:
             self.on_learned(spec)
@@ -274,22 +281,44 @@ class Controller:
         spec = next((s for s in self.config["next_bank"] if _matches(s, kind, channel, number)), None)
         if spec is None:
             return False
+        if self._is_press(spec, kind, on):
+            self.next_bank()
+        return True
+
+    def _is_press(self, spec: str, kind: str, on: bool) -> bool:
+        """Zaehlt ein Tasten-Ereignis als neuer Druck? (momentary und toggle, siehe oben)"""
         now = time.monotonic()
         if kind == "cc" and now - self._last_pc < PC_CC_GAP:
-            return True                          # Bank-Select nach Preset-Wechsel am Controller
+            return False                         # Bank-Select nach Preset-Wechsel am Controller
         st = self._nb_state.setdefault(spec, {"on": None, "t": 0.0, "toggle": False})
         prev_on, prev_t = st["on"], st["t"]
         st["on"], st["t"] = on, now
         if prev_on is not None and prev_on == on:
             st["toggle"] = True
-        if on or st["toggle"] or not (prev_on is True and now - prev_t < RELEASE_WINDOW):
-            self.next_bank()
-        return True
+        if prev_on is None:
+            return on                            # erstes "aus" (z.B. Loslassen direkt nach dem Anlernen)
+        return on or st["toggle"] or not (prev_on is True and now - prev_t < RELEASE_WINDOW)
+
+    # ----------------------------- Looper-Tasten -----------------------------
+    def _transport_input(self, kind: str, channel: int, number: int, on: bool) -> bool:
+        """Record/Stop/Play. True = Eingang gehoert dazu (verbraucht)."""
+        for i, s in enumerate(self.config["transport"]):
+            if _matches(s, kind, channel, number):
+                if self._is_press(s, kind, on):
+                    self.transport(TRANSPORT[i])
+                return True
+        return False
+
+    def transport(self, action: str):
+        if self.on_transport and action in TRANSPORT:
+            self.on_transport(action)
 
     def handle_note_off(self, channel: int, note: int) -> bool:
         """Note-Off. True = gehoert zum Controller, nicht an die Engine."""
-        if self.learn_slot and self.learn_slot[0] in ("pad", "next"):
+        if self.learn_slot and self.learn_slot[0] in ("pad", "next", "transport"):
             return self.is_pad_note(channel, note)
+        if self._transport_input("note", channel, note, False):
+            return True
         if any(_matches(s, "note", channel, note) for s in self.config["pads"]):
             return True
         return self._next_input("note", channel, note, False)
@@ -305,16 +334,20 @@ class Controller:
         """Program Change (manche Controller-Pads senden das). True = verarbeitet."""
         spec = f"pc:{channel}:{program}"
         self._last_pc = time.monotonic()
-        if self.learn_slot and self.learn_slot[0] in ("pad", "next"):
+        if self.learn_slot and self.learn_slot[0] in ("pad", "next", "transport"):
             self._learn_input(spec)
+            return True
+        if self._transport_input("pc", channel, program, True):
             return True
         return self._press_pad(spec)
 
     def handle_note(self, channel: int, note: int, velocity: int) -> bool:
         """Note-On. True = gehoert zum Controller (Pad), nicht spielen."""
         spec = f"note:{channel}:{note}"
-        if self.learn_slot and self.learn_slot[0] in ("pad", "next"):
+        if self.learn_slot and self.learn_slot[0] in ("pad", "next", "transport"):
             self._learn_input(spec)
+            return True
+        if self._transport_input("note", channel, note, True):
             return True
         for i, s in enumerate(self.config["pads"]):     # fest angelernte Pads haben Vorrang
             if _matches(s, "note", channel, note):
@@ -325,7 +358,7 @@ class Controller:
 
     def is_pad_note(self, channel: int, note: int) -> bool:
         return any(_matches(s, "note", channel, note)
-                   for s in self.config["pads"] + self.config["next_bank"])
+                   for s in self.config["pads"] + self.config["next_bank"] + self.config["transport"])
 
     def handle_cc(self, channel: int, cc: int, value: int) -> bool:
         """True = CC wurde hier verarbeitet."""
@@ -333,6 +366,8 @@ class Controller:
         spec = f"cc:{channel}:{cc}"
         if self.learn_slot:
             self._learn_cc(spec, value)
+            return True
+        if self._transport_input("cc", channel, cc, value >= 64):
             return True
         for i, s in enumerate(self.config["pads"]):     # fest angelernte Pads/Knobs haben Vorrang
             if _matches(s, "cc", channel, cc):

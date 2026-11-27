@@ -11,6 +11,7 @@ POST /api/preset/delete{"name": "Mein Sound"}
 POST /api/midi/learn   {"id": "filter.cutoff"}   (id null = abbrechen)
 POST /api/midi/unmap   {"id": "filter.cutoff"}
 POST /api/panic
+POST /api/looper       {"cmd": "record"}                   record | stop | play | clear
 POST /api/ctrl/bank    {"bank": 0}                         aktive Knob-Bank (0-3)
 POST /api/ctrl/learn   {"slot": "knob", "index": 0, "wizard": true}   (slot null = abbrechen)
 POST /api/ctrl/clear   {"slot": "pad", "index": 2}
@@ -55,6 +56,7 @@ class App:
             "midi": self.midi.info() if self.midi else None,
             "controller": self.controller.info() if self.controller else None,
             "status": self.status(),
+            "looper": self.engine.looper.info(),
         }
 
     def status(self) -> dict:
@@ -186,6 +188,12 @@ def make_handler(app: App):
                     return self._json({"ok": ok, "error": None if ok else "WLAN ist gerade beschaeftigt"})
                 if path == "/api/wifi/hotspot":
                     return self._json({"ok": app.wifi.hotspot()})
+                if path == "/api/looper":
+                    cmd = str(data.get("cmd"))
+                    if cmd not in ("record", "stop", "play", "clear"):
+                        return self._json({"error": "cmd"}, 400)
+                    app.engine.looper_cmd(cmd)
+                    return self._json({"ok": True})
                 if path == "/api/panic":
                     app.engine.panic()
                     return self._json({"ok": True})

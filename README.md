@@ -108,8 +108,8 @@ wird beim Start automatisch geleert, eigene Änderungen bleiben):
   (Note 0, im CC-Modus CC 0). Jeder Druck zählt einmal, egal ob das Pad beim Loslassen
   "aus" sendet oder pro Druck zwischen an/aus wechselt (Toggle). CC 0 direkt nach einem
   Program Change (PRESET-Taste am M25) wird ignoriert. Unter "Controller einrichten"
-  anlernbar, Rechtsklick schaltet sie ab. Fest angelernte Pads/Knobs haben Vorrang, feste
-  Bank-Tasten (Pads oder z.B. Stop/Play/Record) gehen weiterhin.
+  anlernbar, Rechtsklick schaltet sie ab. Fest angelernte Pads/Knobs haben Vorrang.
+  Stop/Play/Record steuern den Looper (siehe unten).
 * **Controller-Presets**: Viele Controller (auch der M25) senden je nach Preset andere CCs/Noten.
   Die Knobs/Pads gelten für das Preset, auf dem sie angelernt wurden. Nach einem Preset-Wechsel
   am Controller "Einrichten" neu durchlaufen. Dreht man bei "L" einen Knob, der kein Bank-Knob
@@ -180,6 +180,27 @@ Update `deploy/pynth-wifi`, das Installationsskript einfach erneut ausführen.
   oder Tastatur/Bildschirm am Pi. Gespeicherte WLANs: `nmcli con show`, WLAN neu verbinden:
   `sudo nmcli dev wifi connect "<SSID>" password "<Passwort>"`.
 
+## Looper (Record / Stop / Play)
+
+Der Looper nimmt auf, **was** du spielst (Noten, Anschlag, Sustain-Pedal), nicht den Klang.
+Beim Abspielen laufen die Noten wieder durch die Engine, daher wirken alle Regler live auf
+die Schleife (Filter, Hüllkurve, LFO, Effekte …). Kostet praktisch keine CPU.
+
+| Taste | leer / gestoppt | Aufnahme | Wiedergabe | Overdub |
+|---|---|---|---|---|
+| **Record** | scharf, Aufnahme startet mit der ersten Note (alte Schleife wird ersetzt) | fertig + sofort abspielen | Overdub: dazuspielen | Overdub fertig |
+| **Stop** | – | fertig (Schleife bleibt) | aus | aus |
+| **Play** | Schleife von vorn | fertig + sofort abspielen | von vorn | Overdub fertig |
+
+* Die Schleife ist so lang wie von der ersten Note bis zum Druck auf Stop/Play/Record,
+  höchstens 60 s (`MAX_SECONDS` in `pynth/looper.py`), danach stoppt die Aufnahme selbst.
+* Live gespielte und geloopte Noten haben getrennte Stimmen, gleiche Töne stören sich nicht.
+  Alle teilen sich die 8 Stimmen.
+* **Tasten am Controller**: Web-UI → Looper → "Tasten am Controller anlernen": Feld anklicken,
+  Taste drücken. Eine Taste, die vorher als Pad die Bank umgeschaltet hat, wird dabei als Pad
+  entfernt. Tasten, die MIDI Machine Control (MMC-Sysex) senden, funktionieren ohne Anlernen.
+* Panic stoppt auch die Wiedergabe. Die Schleife wird nicht gespeichert (weg nach Neustart).
+
 ## Dateien
 
 ```
@@ -187,7 +208,8 @@ pynth/params.py   Parametermodell + Live-Event-Verteilung
 pynth/dsp.py      Oszillatoren, LFO, Biquad, Delay-/Comb-/Allpass-Linien, Hall
 pynth/engine.py   Voices, ADSR, Noise, Signalkette
 pynth/midi.py     MIDI-Eingang, Hotplug, CC-Mapping, Learn
-pynth/controller.py Knob-Bänke, Pads, Soft-Takeover, Mod-Rad
+pynth/controller.py Knob-Bänke, Pads, Soft-Takeover, Mod-Rad, Looper-Tasten
+pynth/looper.py   MIDI-Looper (Aufnahme, Wiedergabe, Overdub)
 pynth/web.py      HTTP-API + SSE
 pynth/wifi.py     WLAN-Status, Scan, Verbinden (für die Web-UI)
 deploy/pynth-wifi Fallback-Hotspot + WLAN-Wechsel (root), install-wifi.sh richtet alles ein
