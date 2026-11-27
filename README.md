@@ -135,6 +135,51 @@ wird beim Start automatisch geleert, eigene Änderungen bleiben):
 * Eingehende MIDI-Nachrichten anzeigen: `~/pynth_venv/bin/python -m pynth --midi-monitor`
   (oder `aseqdump -l` / `aseqdump -p <port>`). Die Web-UI zeigt die letzte Nachricht ebenfalls.
 
+## WLAN: Hotspot und WLAN-Wechsel
+
+Damit die Web-UI auch ohne Router/Internet erreichbar ist:
+
+* **Bekanntes WLAN in Reichweite** → der Pi verbindet sich wie gewohnt, UI unter **http://pynth.local:8080**.
+* **Kein bekanntes WLAN** (ca. 60 s nach dem Start oder nach Verbindungsverlust) → der Pi macht den
+  Hotspot **„pynth“** auf (Passwort `pynthpynth`, änderbar in `/etc/default/pynth-wifi`).
+  Handy damit verbinden, dann **http://10.42.0.1:8080** (oder pynth.local).
+* **Im Hotspot**: alle 5 Minuten, wenn gerade kein Gerät verbunden ist, schaut der Pi kurz,
+  ob ein bekanntes WLAN wieder da ist, und wechselt dorthin.
+* **Web-UI → Kasten „WLAN“**: WLANs suchen, auswählen, Passwort eingeben, verbinden. Neue Netze
+  werden gespeichert. Klappt die Verbindung nicht, wird ein falsches Passwort zurückgenommen und
+  der Pi geht zurück ins vorige WLAN bzw. in den Hotspot. Im Hotspot zeigt die Liste den letzten Scan
+  von vorher (der WLAN-Chip kann nicht gleichzeitig Hotspot sein und suchen), ein Netz kann man
+  auch per Namen eintippen.
+* Hotspot und WLAN-Client gleichzeitig kann der Onboard-Chip des Pi nicht zuverlässig, deshalb
+  wird umgeschaltet. Mit einem zweiten USB-WLAN-Stick ginge beides parallel.
+
+Technik: `deploy/pynth-wifi` (läuft als root) mit NetworkManager/`nmcli`. Als Dienst
+`pynth-wifi.service` überwacht es das WLAN. Die Web-UI (Benutzer `pynth`) darf per sudo nur
+`pynth-wifi scan|connect|hotspot` aufrufen (`/etc/sudoers.d/pynth-wifi`). Das Skript liegt
+nach der Installation in `/usr/local/sbin`, also nicht im Repo-Ordner, den `pynth` ändern kann.
+
+**Einmalig einrichten** (als `pi`):
+
+```bash
+sudo -u pynth git -C /home/pynth/pynth pull
+sudo bash /home/pynth/pynth/deploy/install-wifi.sh
+sudo systemctl restart pynth
+```
+
+Das installiert avahi (pynth.local) und iw, setzt den Hostnamen auf `pynth`, legt das
+Hotspot-Profil an und startet den Wächter. Das Heim-WLAN bleibt unverändert. Ändert ein späteres
+Update `deploy/pynth-wifi`, das Installationsskript einfach erneut ausführen.
+
+**Wenn etwas schiefgeht:**
+
+* Logs: `journalctl -u pynth-wifi -f`
+* Wächter aus (Hotspot startet nicht mehr): `sudo systemctl disable --now pynth-wifi`
+* Hotspot sofort beenden: `sudo nmcli con down pynth-hotspot`
+* Alles entfernen: `sudo bash /home/pynth/pynth/deploy/install-wifi.sh --uninstall`
+* Kein Zugang per WLAN mehr: per Hotspot „pynth“ verbinden und `ssh pi@10.42.0.1`, oder LAN-Kabel,
+  oder Tastatur/Bildschirm am Pi. Gespeicherte WLANs: `nmcli con show`, WLAN neu verbinden:
+  `sudo nmcli dev wifi connect "<SSID>" password "<Passwort>"`.
+
 ## Looper (Record / Stop / Play)
 
 Der Looper nimmt auf, **was** du spielst (Noten, Anschlag, Sustain-Pedal), nicht den Klang.
@@ -166,6 +211,8 @@ pynth/midi.py     MIDI-Eingang, Hotplug, CC-Mapping, Learn
 pynth/controller.py Knob-Bänke, Pads, Soft-Takeover, Mod-Rad, Looper-Tasten
 pynth/looper.py   MIDI-Looper (Aufnahme, Wiedergabe, Overdub)
 pynth/web.py      HTTP-API + SSE
+pynth/wifi.py     WLAN-Status, Scan, Verbinden (für die Web-UI)
+deploy/pynth-wifi Fallback-Hotspot + WLAN-Wechsel (root), install-wifi.sh richtet alles ein
 pynth/presets.py  Preset-Format (JSON)
 web/index.html    Web-UI
 presets/*.json    6 Start-Presets

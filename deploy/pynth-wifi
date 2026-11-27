@@ -1,0 +1,226 @@
+#!/bin/bash
+# pynth-wifi: Fallback-Hotspot + WLAN-Wechsel fuer Pynth (laeuft als root).
+#
+#   pynth-wifi watch     Waechter (systemd: pynth-wifi.service). Ist wlan0 laenger als GRACE
+#                        Sekunden ohne WLAN, startet der Hotspot. Im Hotspot ohne verbundene
+#                        Geraete wird alle RETRY Sekunden geprueft, ob ein bekanntes WLAN da ist.
+#   pynth-wifi scan      WLANs auflisten (fuer die Web-UI, im Hotspot: letzter Scan)
+#   pynth-wifi connect   SSID und Passwort zeilenweise von stdin, verbindet wlan0
+#   pynth-wifi hotspot   Hotspot jetzt starten
+#
+# Die Web-UI (Benutzer pynth) darf per sudo genau scan/connect/hotspot aufrufen
+# (deploy/pynth-wifi.sudoers). Installiert wird das Skript nach /usr/local/sbin, damit
+# der Benutzer pynth es nicht veraendern kann.
+set -u
+export LC_ALL=C
+
+IFACE=wlan0
+HOTSPOT_SSID=pynth
+HOTSPOT_PSK=pynthpynth
+GRACE=60
+RETRY=300
+TICK=10
+# shellcheck disable=SC1091
+[ -r /etc/default/pynth-wifi ] && . /etc/default/pynth-wifi
+
+HOTSPOT=pynth-hotspot            # Name des NetworkManager-Profils
+RUN=/run/pynth-wifi
+SCAN_CACHE=$RUN/scan
+mkdir -p "$RUN"
+
+log() { echo "pynth-wifi: $*" >&2; }
+unesc() { sed 's/\\\(.\)/\1/g'; }        # nmcli -t/-g maskiert ':' und '\'
+
+# Zustand von wlan0: client | hotspot | connecting | none
+state() {
+    local out s c
+    out=$(nmcli -g GENERAL.STATE,GENERAL.CONNECTION dev show "$IFACE" 2>/dev/null) || { echo none; return; }
+    s=$(sed -n 1p <<<"$out" | cut -d' ' -f1)
+    c=$(sed -n 2p <<<"$out" | unesc)
+    if [ "$s" = 100 ]; then
+        [ "$c" = "$HOTSPOT" ] && echo hotspot || echo client
+    elif [ "${s:-0}" -ge 40 ] 2>/dev/null && [ "$s" -lt 100 ]; then
+        echo connecting
+    else
+        echo none
+    fi
+}
+
+has_clients() {
+    command -v iw >/dev/null || return 0          # ohne iw: lieber im Hotspot bleiben
+    iw dev "$IFACE" station dump 2>/dev/null | grep -q '^Station'
+}
+
+ensure_hotspot_profile() {
+    if ! nmcli -t -f NAME con show | unesc | grep -qxF "$HOTSPOT"; then
+        log "lege Hotspot-Profil an (SSID $HOTSPOT_SSID)"
+        nmcli con add type wifi ifname "$IFACE" con-name "$HOTSPOT" autoconnect no ssid "$HOTSPOT_SSID" >/dev/null || return 1
+    fi
+    nmcli con modify "$HOTSPOT" connection.autoconnect no \
+        802-11-wireless.ssid "$HOTSPOT_SSID" 802-11-wireless.mode ap \
+        802-11-wireless.band bg 802-11-wireless.channel 6 \
+        ipv4.method shared ipv4.addresses 10.42.0.1/24 ipv6.method disabled \
+        wifi-sec.key-mgmt wpa-psk wifi-sec.proto rsn wifi-sec.pairwise ccmp wifi-sec.group ccmp \
+        wifi-sec.psk "$HOTSPOT_PSK" >/dev/null
+}
+
+# Scan im Client-Modus; Ergebnis landet auch im Cache (im Hotspot-Modus geht kein Scan)
+fresh_scan() {
+    nmcli dev wifi rescan ifname "$IFACE" >/dev/null 2>&1
+    sleep 4
+    nmcli -t -f SIGNAL,SECURITY,SSID dev wifi list ifname "$IFACE" --rescan no 2>/dev/null \
+        | grep -v ':$' > "$SCAN_CACHE.tmp" && mv "$SCAN_CACHE.tmp" "$SCAN_CACHE"
+}
+
+# UUID des gespeicherten Client-Profils fuer eine SSID (leer, wenn keins)
+profile_for() {
+    local uuid type ssid mode
+    while IFS=: read -r uuid type; do
+        [ "$type" = 802-11-wireless ] || continue
+        mode=$(nmcli -g 802-11-wireless.mode con show "$uuid" 2>/dev/null)
+        [ "$mode" = ap ] && continue
+        ssid=$(nmcli -g 802-11-wireless.ssid con show "$uuid" 2>/dev/null | unesc)
+        [ "$ssid" = "$1" ] && { echo "$uuid"; return; }
+    done < <(nmcli -g UUID,TYPE con show 2>/dev/null)
+}
+
+known_ssids() {
+    local uuid type mode
+    while IFS=: read -r uuid type; do
+        [ "$type" = 802-11-wireless ] || continue
+        mode=$(nmcli -g 802-11-wireless.mode con show "$uuid" 2>/dev/null)
+        [ "$mode" = ap ] && continue
+        nmcli -g 802-11-wireless.ssid con show "$uuid" 2>/dev/null | unesc
+    done < <(nmcli -g UUID,TYPE con show 2>/dev/null)
+}
+
+# Ein bekanntes, sichtbares WLAN verbinden. 0 = verbunden
+try_known() {
+    fresh_scan
+    local i ssid uuid
+    for i in 1 2 3; do                            # NetworkManager verbindet oft von selbst
+        [ "$(state)" = client ] && return 0
+        sleep 5
+    done
+    while IFS= read -r ssid; do
+        [ -n "$ssid" ] || continue
+        cut -d: -f3- "$SCAN_CACHE" 2>/dev/null | unesc | grep -qxF "$ssid" || continue
+        uuid=$(profile_for "$ssid")
+        [ -n "$uuid" ] || continue
+        log "versuche bekanntes WLAN: $ssid"
+        nmcli -w 30 con up "$uuid" >/dev/null 2>&1 && [ "$(state)" = client ] && return 0
+    done < <(known_ssids)
+    return 1
+}
+
+start_hotspot() {
+    ensure_hotspot_profile || return 1
+    [ "$(state)" = client ] || fresh_scan         # Liste fuer die Web-UI merken
+    log "starte Hotspot \"$HOTSPOT_SSID\" (http://10.42.0.1:8080)"
+    nmcli -w 30 con up "$HOTSPOT" >/dev/null
+}
+
+cmd_watch() {
+    ensure_hotspot_profile || log "Hotspot-Profil konnte nicht angelegt werden"
+    local lost=0 idle=0 st
+    while sleep "$TICK"; do
+        exec 9>"$RUN/lock"
+        flock -n 9 || continue                    # gerade laeuft connect/hotspot aus der Web-UI
+        st=$(state)
+        case $st in
+            client) lost=0 idle=0 ;;
+            connecting) ;;
+            hotspot)
+                lost=0
+                if has_clients; then idle=0; else idle=$((idle + TICK)); fi
+                if [ "$idle" -ge "$RETRY" ]; then
+                    idle=0
+                    log "Hotspot ohne Geraete, suche bekannte WLANs"
+                    nmcli con down "$HOTSPOT" >/dev/null 2>&1
+                    try_known || start_hotspot
+                fi ;;
+            *)
+                lost=$((lost + TICK))
+                if [ "$lost" -ge "$GRACE" ]; then
+                    lost=0 idle=0
+                    log "kein WLAN seit ${GRACE}s"
+                    try_known || start_hotspot
+                fi ;;
+        esac
+        exec 9>&-
+    done
+}
+
+cmd_scan() {
+    local st
+    st=$(state)
+    if [ "$st" != hotspot ]; then fresh_scan; fi
+    echo "mode:$st"
+    [ -r "$SCAN_CACHE" ] && sed 's/^/net:/' "$SCAN_CACHE"
+    known_ssids | sed 's/\\/\\\\/g; s/:/\\:/g; s/^/known:/'
+}
+
+cmd_connect() {
+    local ssid="" psk="" uuid oldpsk="" st new=0
+    IFS= read -r ssid || true
+    IFS= read -r psk || true
+    if [ -z "$ssid" ] || [ "${#ssid}" -gt 32 ] || [[ $ssid == *[[:cntrl:]]* ]]; then
+        echo "Ungueltige SSID"; return 2
+    fi
+    if [ -n "$psk" ] && { [ "${#psk}" -lt 8 ] || [ "${#psk}" -gt 64 ] || [[ $psk == *[[:cntrl:]]* ]]; }; then
+        echo "Passwort muss 8 bis 63 Zeichen haben"; return 2
+    fi
+    exec 9>"$RUN/lock"
+    flock -w 60 9 || { echo "WLAN ist gerade beschaeftigt, bitte nochmal"; return 1; }
+    st=$(state)
+    if [ "$st" = hotspot ]; then
+        nmcli con down "$HOTSPOT" >/dev/null 2>&1
+        sleep 2
+    fi
+    nmcli dev wifi rescan ifname "$IFACE" >/dev/null 2>&1
+    sleep 5
+    uuid=$(profile_for "$ssid")
+    if [ -n "$uuid" ]; then
+        if [ -n "$psk" ]; then                     # altes Passwort merken, falls das neue falsch ist
+            oldpsk=$(nmcli -s -g 802-11-wireless-security.psk con show "$uuid" 2>/dev/null)
+            nmcli con modify "$uuid" wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$psk"
+        fi
+    else
+        new=1
+        uuid=$(nmcli con add type wifi ifname "$IFACE" con-name "$ssid" ssid "$ssid" \
+               connection.autoconnect yes 2>/dev/null | sed -n 's/.*(\([0-9a-f-]\{36\}\)).*/\1/p')
+        [ -n "$uuid" ] || { echo "Profil konnte nicht angelegt werden"; [ "$st" = hotspot ] && start_hotspot; return 1; }
+        [ -n "$psk" ] && nmcli con modify "$uuid" wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$psk"
+    fi
+    if nmcli -w 40 con up "$uuid" >/dev/null 2>&1 && [ "$(state)" = client ]; then
+        echo "Verbunden mit $ssid"
+        return 0
+    fi
+    log "Verbindung mit $ssid fehlgeschlagen"
+    if [ "$new" = 1 ]; then
+        nmcli con delete "$uuid" >/dev/null 2>&1
+    elif [ -n "$psk" ]; then
+        if [ -n "$oldpsk" ]; then nmcli con modify "$uuid" wifi-sec.psk "$oldpsk"; fi
+    fi
+    if [ "$st" = hotspot ]; then
+        start_hotspot
+    elif [ "$st" = client ]; then                   # zurueck ins vorige WLAN
+        try_known >/dev/null 2>&1 || start_hotspot
+    fi
+    echo "Verbindung mit $ssid fehlgeschlagen (falsches Passwort oder Netz nicht in Reichweite)"
+    return 1
+}
+
+cmd_hotspot() {
+    exec 9>"$RUN/lock"
+    flock -w 60 9 || { echo "WLAN ist gerade beschaeftigt"; return 1; }
+    start_hotspot && echo "Hotspot laeuft"
+}
+
+case "${1:-}" in
+    watch) cmd_watch ;;
+    scan) cmd_scan ;;
+    connect) cmd_connect ;;
+    hotspot) cmd_hotspot ;;
+    *) echo "Aufruf: $0 watch|scan|connect|hotspot" >&2; exit 2 ;;
+esac

@@ -18,6 +18,10 @@ POST /api/ctrl/clear   {"slot": "pad", "index": 2}
 POST /api/ctrl/assign  {"bank": 1, "knob": 7, "id": "lfo.rate"}   (id null = leer)
 POST /api/ctrl/modwheel{"id": "lfo.depth"}
 POST /api/ctrl/takeover{"mode": "jump"}                    "jump" oder "pickup" (Soft-Takeover)
+GET  /api/wifi        WLAN-Status (Modus client/hotspot, Verbindung, IP)
+POST /api/wifi/scan                                       WLANs suchen
+POST /api/wifi/connect{"ssid": "MeinWLAN", "password": "..."}  verbindet im Hintergrund
+POST /api/wifi/hotspot                                    Hotspot jetzt starten
 """
 from __future__ import annotations
 
@@ -39,6 +43,8 @@ class App:
         self.controller = controller
         self.web_dir = Path(web_dir)
         self.audio_info = audio_info
+        from .wifi import Wifi
+        self.wifi = Wifi(on_change=lambda st: params.broadcast("wifi", st))
 
     def state(self) -> dict:
         return {
@@ -85,6 +91,8 @@ def make_handler(app: App):
                 self.wfile.write(body)
             elif self.path == "/api/state":
                 self._json(app.state())
+            elif self.path == "/api/wifi":
+                self._json(app.wifi.status())
             elif self.path == "/api/events":
                 self._sse()
             else:
@@ -173,6 +181,13 @@ def make_handler(app: App):
                 if path == "/api/ctrl/takeover" and c:
                     c.set_takeover(str(data.get("mode")))
                     return self._json({"ok": True})
+                if path == "/api/wifi/scan":
+                    return self._json(app.wifi.scan())
+                if path == "/api/wifi/connect":
+                    ok = app.wifi.connect(data["ssid"], data.get("password", ""))
+                    return self._json({"ok": ok, "error": None if ok else "WLAN ist gerade beschaeftigt"})
+                if path == "/api/wifi/hotspot":
+                    return self._json({"ok": app.wifi.hotspot()})
                 if path == "/api/looper":
                     cmd = str(data.get("cmd"))
                     if cmd not in ("record", "stop", "play", "clear"):
@@ -184,6 +199,8 @@ def make_handler(app: App):
                     return self._json({"ok": True})
             except KeyError as e:
                 return self._json({"error": f"unbekannt: {e}"}, 404)
+            except ValueError as e:
+                return self._json({"ok": False, "error": str(e)}, 400)
             return self._json({"error": "not found"}, 404)
 
     return Handler
