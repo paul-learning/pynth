@@ -102,8 +102,7 @@ Die Web-UI zeigt CPU-Last und Underruns live an.
 ### Knob-Bänke (z.B. Samson Graphite M25: 8 Knobs, 4 Pads)
 
 Die 4 Pads schalten die Bank um, jede Bank belegt die 8 Knobs neu, also bis zu 32 Regler.
-Alle Bänke starten leer und werden selbst belegt (eine alte Vorbelegung in `controller.json`
-wird beim Start automatisch geleert, eigene Änderungen bleiben):
+Alle Bänke starten leer und werden selbst belegt:
 
 * **Bank belegen**: Pad drücken (oder in der Web-UI die Bank wählen), dann **L** am Regler
   klicken und einen der 8 Knobs drehen. Der Regler landet auf diesem Knob in der aktiven Bank.
