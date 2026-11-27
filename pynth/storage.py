@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import shutil
+import time
 from pathlib import Path
 
 log = logging.getLogger("pynth.storage")
@@ -42,7 +43,27 @@ def _read(path: Path):
     return json.loads(text)
 
 
-def save_json(path, data, *, sort_keys: bool = False, backup: bool = True):
+HISTORY_DIR = "backups"
+HISTORY_KEEP = 30
+
+
+def _history(path: Path, text: str):
+    """Jede geaenderte Fassung zusaetzlich mit Zeitstempel in backups/ ablegen (die letzten 30)."""
+    folder = path.parent / HISTORY_DIR
+    try:
+        folder.mkdir(exist_ok=True)
+        old = sorted(folder.glob(path.name + ".*"))
+        if old and old[-1].read_text() == text:
+            return                                       # unveraendert
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        (folder / f"{path.name}.{stamp}").write_text(text)
+        for f in sorted(folder.glob(path.name + ".*"))[:-HISTORY_KEEP]:
+            f.unlink()
+    except OSError as e:
+        log.warning("Kann Verlauf fuer %s nicht schreiben: %s", path, e)
+
+
+def save_json(path, data, *, sort_keys: bool = False, backup: bool = True, history: bool = False):
     path = Path(path)
     text = json.dumps(data, indent=2, ensure_ascii=False, sort_keys=sort_keys) + "\n"
     tmp = path.with_name(path.name + ".tmp")
@@ -58,6 +79,8 @@ def save_json(path, data, *, sort_keys: bool = False, backup: bool = True):
             pass
     os.replace(tmp, path)
     _fsync_dir(path.parent)
+    if history:
+        _history(path, text)
 
 
 def load_json(path, default=None):

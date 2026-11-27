@@ -265,7 +265,9 @@ function build(state) {
     const learn = document.createElement('button'); learn.className = 'learn'; learn.textContent = 'L';
     learn.title = 'MIDI-Learn: klicken, dann Knopf am Controller bewegen. Rechtsklick = Zuordnung löschen';
     learn.onclick = () => post('/api/midi/learn', {id: midi.learn === p.id ? null : p.id});
-    learn.oncontextmenu = e => { e.preventDefault(); post('/api/midi/unmap', {id: p.id}); };
+    learn.oncontextmenu = e => { e.preventDefault();      // am Tablet = langes Druecken: erst nachfragen
+      if (learn.classList.contains('mapped') && !confirm(`Zuordnung von "${p.label}" löschen?`)) return;
+      post('/api/midi/unmap', {id: p.id}); };
     row.appendChild(learn);
     const ctl = row.querySelector('.ctl'), entry = {val: row.querySelector('.val'), learn};
     if (p.choices.length) {
