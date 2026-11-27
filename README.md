@@ -106,8 +106,12 @@ wird beim Start automatisch geleert, eigene Änderungen bleiben):
   (Note 0, im CC-Modus CC 0). Jeder Druck zählt einmal, egal ob das Pad beim Loslassen
   "aus" sendet oder pro Druck zwischen an/aus wechselt (Toggle). CC 0 direkt nach einem
   Program Change (PRESET-Taste am M25) wird ignoriert. Unter "Controller einrichten"
-  anlernbar, Rechtsklick schaltet sie ab. Feste Bank-Tasten (Pads oder z.B. Stop/Play/Record)
-  gehen weiterhin.
+  anlernbar, Rechtsklick schaltet sie ab. Fest angelernte Pads/Knobs haben Vorrang, feste
+  Bank-Tasten (Pads oder z.B. Stop/Play/Record) gehen weiterhin.
+* **Controller-Presets**: Viele Controller (auch der M25) senden je nach Preset andere CCs/Noten.
+  Die Knobs/Pads gelten für das Preset, auf dem sie angelernt wurden. Nach einem Preset-Wechsel
+  am Controller "Einrichten" neu durchlaufen. Dreht man bei "L" einen Knob, der kein Bank-Knob
+  ist, zeigt die Web-UI einen Hinweis: die Zuordnung gilt dann in allen Bänken.
 * **MIDI-Monitor**: unter "Controller einrichten" stehen die letzten 40 eingehenden Nachrichten
   (mit Kanal 1–16). Damit sieht man, was Pads und Tasten wirklich senden.
 * **Einrichten**: Web-UI → "Controller einrichten" → **Einrichten**, dann Knob 1 bis 8 jeweils

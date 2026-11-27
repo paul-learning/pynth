@@ -35,6 +35,7 @@ class MidiManager:
         self.ports: dict[str, object] = {}
         self.last_message = ""
         self._last_shown = 0.0
+        self._hold_until = 0.0
         self.log: deque[str] = deque(maxlen=40)      # MIDI-Monitor (rohe Nachrichten)
         self._last_raw: dict[str, float] = {}
         self._stop = threading.Event()
@@ -100,11 +101,16 @@ class MidiManager:
     def _announce(self):
         self.params.broadcast("midi", self.info())
 
-    def _show(self, text: str):
-        """Letzte MIDI-Nachricht in der Web-UI anzeigen (max. ~10x pro Sekunde)."""
-        self.last_message = text
+    def _show(self, text: str, hold: float = 0.0):
+        """Letzte MIDI-Nachricht in der Web-UI anzeigen (max. ~10x pro Sekunde).
+        hold > 0: wichtiger Hinweis, sofort zeigen und so viele Sekunden stehen lassen."""
         now = time.monotonic()
-        if now - self._last_shown > 0.1:
+        if hold:
+            self._hold_until = now + hold
+        elif now < self._hold_until:
+            return
+        self.last_message = text
+        if hold or now - self._last_shown > 0.1:
             self._last_shown = now
             self.params.broadcast("midilast", text)
 
@@ -152,11 +158,18 @@ class MidiManager:
                         self.mapping.pop(key, None)
                         ctl.assign(ctl.bank, knob, pid)
                         log.info("MIDI-Learn: Bank %d Knob %d -> %s", ctl.bank + 1, knob + 1, pid)
+                        self._show(f"Gelernt: {self.params.params[pid].label} -> Knob {knob + 1} "
+                                   f"in Bank {ctl.bank + 1}", hold=3)
                     else:
                         self.mapping[key] = pid
                         if ctl:
                             ctl.forget_input(f"cc:{key}")      # Knopf ist jetzt direkt belegt
                         log.info("MIDI-Learn: %s -> %s", key, pid)
+                        if ctl:                         # deutlich sagen, dass das KEIN Bank-Knob ist
+                            self._show(f"CC {msg.control} ist kein Bank-Knob -> "
+                                       f"{self.params.params[pid].label} gilt in ALLEN Bänken. "
+                                       "Falls das ein Bank-Knob sein soll: Knobs unter "
+                                       "'Controller einrichten' neu anlernen.", hold=6)
                     self.learn_target = None
                     self._save_map()
                     self._announce()

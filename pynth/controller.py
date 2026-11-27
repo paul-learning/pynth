@@ -290,9 +290,9 @@ class Controller:
         """Note-Off. True = gehoert zum Controller, nicht an die Engine."""
         if self.learn_slot and self.learn_slot[0] in ("pad", "next"):
             return self.is_pad_note(channel, note)
-        if self._next_input("note", channel, note, False):
+        if any(_matches(s, "note", channel, note) for s in self.config["pads"]):
             return True
-        return self.is_pad_note(channel, note)
+        return self._next_input("note", channel, note, False)
 
     def _press_pad(self, spec: str) -> bool:
         for i, s in enumerate(self.config["pads"]):
@@ -316,14 +316,12 @@ class Controller:
         if self.learn_slot and self.learn_slot[0] in ("pad", "next"):
             self._learn_input(spec)
             return True
-        if self._next_input("note", channel, note, True):
-            return True
-        for i, s in enumerate(self.config["pads"]):
+        for i, s in enumerate(self.config["pads"]):     # fest angelernte Pads haben Vorrang
             if _matches(s, "note", channel, note):
                 if i != self.bank:
                     self.set_bank(i)
                 return True
-        return False
+        return self._next_input("note", channel, note, True)
 
     def is_pad_note(self, channel: int, note: int) -> bool:
         return any(_matches(s, "note", channel, note)
@@ -336,9 +334,7 @@ class Controller:
         if self.learn_slot:
             self._learn_cc(spec, value)
             return True
-        if self._next_input("cc", channel, cc, value >= 64):
-            return True
-        for i, s in enumerate(self.config["pads"]):
+        for i, s in enumerate(self.config["pads"]):     # fest angelernte Pads/Knobs haben Vorrang
             if _matches(s, "cc", channel, cc):
                 if value > 0:
                     self.set_bank(i)
@@ -347,6 +343,8 @@ class Controller:
             if _matches(s, "cc", channel, cc):
                 self._knob(i, x)
                 return True
+        if self._next_input("cc", channel, cc, value >= 64):
+            return True
         mw = self.config["modwheel"]
         if mw.get("param") and _matches(mw.get("input"), "cc", channel, cc):
             self.params.set_norm(mw["param"], x, source="midi")
