@@ -30,7 +30,7 @@ Polyphoner Subtraktiv-Synth in Python (numpy/scipy), spielbar per MIDI-Keyboard
 * **Bereiche in der UI**: Oszillator 1, Oszillator 2, Noise (white/pink), Mix (Lautstärken
   Osc 1, Osc 2, Noise + Master), Hüllkurve, Filter, LFO, Effekte.
 * **Feste Werte** (in `engine.py` oben, als Konstanten änderbar): 8 Stimmen,
-  Pitchbend ±2 Halbtöne, Velocity-Empfindlichkeit 0,6.
+  Velocity-Empfindlichkeit 0,6.
 * **Filter** ist global (paraphon): ein Filter auf die Summe aller Stimmen. Spart auf dem
   Pi viel CPU. Pro-Stimme-Filter + Filter-Hüllkurve ist der nächste Ausbauschritt.
 * **Web-Stack**: nur Python-Standardbibliothek (`http.server` + Server-Sent Events),
@@ -89,6 +89,8 @@ Die Web-UI zeigt CPU-Last und Underruns live an.
   Controller drehen. Rechtsklick auf die Nummer löscht die Zuordnung.
   Gespeichert in `midi_map.json` als `{"<kanal>:<cc>": "<param-id>"}`.
 * Fest: Noten, Pitchbend, CC 64 Sustain, CC 123 All Notes Off.
+* **Pitchbend**: Bereich in der Web-UI unter Oszillator 2 ("Pitchbend", 0–12 Halbtöne,
+  Standard ±2). Der Bend gleitet pro Sample, auch bei großen Blöcken ohne Stufen.
 
 ### Knob-Bänke (z.B. Samson Graphite M25: 8 Knobs, 4 Pads)
 
