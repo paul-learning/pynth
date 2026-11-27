@@ -8,7 +8,6 @@
 """
 from __future__ import annotations
 
-import json
 import logging
 import threading
 import time
@@ -16,6 +15,7 @@ from collections import deque
 from pathlib import Path
 
 from .params import RENAMED
+from .storage import load_json, save_json
 
 log = logging.getLogger("pynth.midi")
 
@@ -57,17 +57,20 @@ class MidiManager:
 
     # ----------------------------- Mapping -----------------------------
     def _load_map(self):
-        try:
-            data = json.loads(self.map_file.read_text())
-            data = {k: RENAMED.get(v, v) for k, v in data.items()}   # alte IDs uebernehmen
-            self.mapping = {k: v for k, v in data.items() if v in self.params.params}
-            if self.mapping != json.loads(self.map_file.read_text()):
-                self._save_map()
-        except (OSError, ValueError):
-            self.mapping = {}
+        data = load_json(self.map_file, {})
+        if not isinstance(data, dict):
+            data = {}
+        raw = dict(data)
+        data = {k: RENAMED.get(v, v) for k, v in data.items()}   # alte IDs uebernehmen
+        self.mapping = {k: v for k, v in data.items() if v in self.params.params}
+        if raw and self.mapping != raw:
+            self._save_map()
 
     def _save_map(self):
-        self.map_file.write_text(json.dumps(self.mapping, indent=2, sort_keys=True) + "\n")
+        try:
+            save_json(self.map_file, self.mapping, sort_keys=True)
+        except OSError as e:
+            log.warning("Kann %s nicht schreiben: %s", self.map_file, e)
 
     def learn(self, pid: str | None):
         self.learn_target = pid if pid in self.params.params else None

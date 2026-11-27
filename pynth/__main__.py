@@ -10,7 +10,6 @@ Weitere Modi:
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import os
 import signal
@@ -24,9 +23,17 @@ import numpy as np
 from .engine import Engine
 from .params import ParamStore
 from .presets import PresetStore, flatten, nest
+from .storage import load_json, save_json
 
 ROOT = Path(__file__).resolve().parent.parent
 log = logging.getLogger("pynth")
+
+
+def save_state(state_file, params):
+    try:
+        save_json(state_file, nest(params.values, params.preset_name))
+    except OSError as e:
+        log.warning("Kann %s nicht schreiben: %s", state_file, e)
 
 
 def parse_args():
@@ -143,12 +150,10 @@ def main():
     state_file = data / "state.json"
     if args.preset:
         params.load_flat(presets.load(args.preset), args.preset)
-    elif state_file.exists():                          # letzter Zustand vor dem Neustart
-        try:
-            st = json.loads(state_file.read_text())
+    else:                                              # letzter Zustand vor dem Neustart
+        st = load_json(state_file)
+        if isinstance(st, dict):
             params.load_flat(flatten(st), st.get("name", "Init"))
-        except (OSError, ValueError):
-            log.warning("state.json kaputt, starte mit Defaults")
     params.dirty = False
 
     if args.render:
@@ -206,10 +211,10 @@ def main():
     while not stop.wait(5.0):                          # alle 5 s Zustand sichern, falls geaendert
         if params.dirty:
             params.dirty = False
-            state_file.write_text(json.dumps(nest(params.values, params.preset_name), indent=2) + "\n")
+            save_state(state_file, params)
     log.info("Beende ...")
     if params.dirty:
-        state_file.write_text(json.dumps(nest(params.values, params.preset_name), indent=2) + "\n")
+        save_state(state_file, params)
     if stream:
         stream.stop()
         stream.close()
