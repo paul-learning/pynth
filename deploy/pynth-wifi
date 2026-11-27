@@ -51,6 +51,8 @@ has_clients() {
     iw dev "$IFACE" station dump 2>/dev/null | grep -q '^Station'
 }
 
+# WPA2/AES, kein PMF und kein Stromsparen: mit PMF scheitern viele Tablets/Handys am
+# Onboard-WLAN (brcmfmac) im Hotspot-Modus mit "Verbindung fehlgeschlagen".
 ensure_hotspot_profile() {
     if ! nmcli -t -f NAME con show | unesc | grep -qxF "$HOTSPOT"; then
         log "lege Hotspot-Profil an (SSID $HOTSPOT_SSID)"
@@ -61,6 +63,7 @@ ensure_hotspot_profile() {
         802-11-wireless.band bg 802-11-wireless.channel 6 \
         ipv4.method shared ipv4.addresses 10.42.0.1/24 ipv6.method disabled \
         wifi-sec.key-mgmt wpa-psk wifi-sec.proto rsn wifi-sec.pairwise ccmp wifi-sec.group ccmp \
+        wifi-sec.pmf disable 802-11-wireless.powersave disable \
         wifi-sec.psk "$HOTSPOT_PSK" >/dev/null
 }
 

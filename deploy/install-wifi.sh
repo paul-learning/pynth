@@ -18,8 +18,8 @@ fi
 
 nmcli -t general status >/dev/null 2>&1 || { echo "NetworkManager laeuft nicht, Abbruch."; exit 1; }
 
-echo "== Pakete (avahi fuer pynth.local, iw fuer den Hotspot)"
-apt-get install -y avahi-daemon iw >/dev/null
+echo "== Pakete (avahi fuer pynth.local, iw + dnsmasq-base fuer den Hotspot)"
+apt-get install -y avahi-daemon iw dnsmasq-base >/dev/null
 systemctl enable --now avahi-daemon >/dev/null 2>&1 || true
 
 echo "== Skript, Einstellungen, sudo-Regel"
@@ -47,6 +47,10 @@ install -o root -g root -m 0644 "$DIR/pynth-wifi.service" /etc/systemd/system/py
 systemctl daemon-reload
 systemctl enable pynth-wifi.service >/dev/null 2>&1
 systemctl restart pynth-wifi.service
+# laeuft der Hotspot schon, neu starten, damit geaenderte Einstellungen greifen
+if nmcli -t -f NAME con show --active | grep -qx pynth-hotspot; then
+    sleep 3; nmcli con up pynth-hotspot >/dev/null || true
+fi
 
 . /etc/default/pynth-wifi
 echo
