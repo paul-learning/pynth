@@ -68,7 +68,7 @@ class MidiManager:
 
     def _save_map(self):
         try:
-            save_json(self.map_file, self.mapping, sort_keys=True)
+            save_json(self.map_file, self.mapping, sort_keys=True, history=True)
         except OSError as e:
             log.warning("Kann %s nicht schreiben: %s", self.map_file, e)
 
@@ -77,6 +77,7 @@ class MidiManager:
         self._announce()
 
     def unmap(self, pid: str):
+        log.info("Zuordnung von %s entfernt", pid)
         self.mapping = {k: v for k, v in self.mapping.items() if v != pid}
         self._save_map()
         if self.controller:

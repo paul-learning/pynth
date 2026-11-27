@@ -91,6 +91,8 @@ class Controller:
         data = load_json(self.file)
         if not isinstance(data, dict):
             return
+        n = sum(1 for b in data.get("banks") or [] if isinstance(b, dict) for p in b.get("params") or [] if p)
+        log.info("%s geladen: %d Knob-Belegungen in den Baenken", self.file.name, n)
         cfg = self.config
         for key, n in (("knobs", N_KNOBS), ("pads", N_PADS), ("transport", len(TRANSPORT))):
             vals = list(data.get(key) or [])[:n]
@@ -123,7 +125,7 @@ class Controller:
 
     def _save(self):
         try:
-            save_json(self.file, self.config)
+            save_json(self.file, self.config, history=True)
         except OSError as e:
             log.warning("Kann %s nicht schreiben: %s", self.file, e)
 
@@ -198,6 +200,8 @@ class Controller:
 
     def assign(self, bank: int, knob: int, pid: str | None):
         if 0 <= bank < N_PADS and 0 <= knob < N_KNOBS and (pid is None or pid in self.params.params):
+            old = self.config["banks"][bank]["params"][knob]
+            log.info("Bank %d Knob %d: %s -> %s", bank + 1, knob + 1, old or "-", pid or "-")
             self.config["banks"][bank]["params"][knob] = pid
             if bank == self.bank:
                 self._picked[knob] = False
@@ -217,6 +221,7 @@ class Controller:
             for k, x in enumerate(ps):
                 if x == pid:
                     ps[k] = None
+                    log.info("Bank %d Knob %d: %s -> - (entfernt)", self.bank + 1, k + 1, pid)
             self._save()
             self._announce()
 
