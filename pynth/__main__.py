@@ -34,7 +34,9 @@ log = logging.getLogger("pynth")
 
 def save_state(state_file, params):
     try:
-        save_json(state_file, nest(params.values, params.preset_name))
+        st = nest(params.values, params.preset_name)
+        st["ranges"] = params.ranges()                 # z.B. eingestellter Looper-Tempo-Bereich
+        save_json(state_file, st)
     except OSError as e:
         log.warning("Kann %s nicht schreiben: %s", state_file, e)
 
@@ -174,6 +176,11 @@ def main():
     else:                                              # letzter Zustand vor dem Neustart
         st = load_json(state_file)
         if isinstance(st, dict):
+            for pid, r in (st.pop("ranges", None) or {}).items():
+                try:
+                    params.set_range(pid, *r)
+                except (TypeError, ValueError):
+                    pass
             params.load_flat(flatten(st), st.get("name", "Init"))
     params.dirty = False
 

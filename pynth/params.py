@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 import queue
 import threading
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, asdict, replace
 
 WAVES = ("sine", "saw", "square", "triangle")
 
@@ -28,6 +28,7 @@ class Param:
     unit: str = ""
     choices: tuple = field(default_factory=tuple)
     preset: bool = True         # False = nicht Teil des Klangs (Preset laden laesst den Wert stehen)
+    limits: tuple = ()          # (lo, hi): Bereich min..max ist in der Web-UI einstellbar, in diesen Grenzen
 
     @property
     def is_choice(self) -> bool:
@@ -105,7 +106,8 @@ PARAMS: list[Param] = [
     Param("fx.reverb_size", "Hall Größe", "fx", 0, 1, 0.6),
 
     # Tempo der Looper-Wiedergabe (Noten kommen schneller/langsamer, Tonhoehe bleibt)
-    Param("looper.speed", "Tempo", "looper", 0.25, 5.0, 1.0, curve="exp", unit="×", preset=False),
+    Param("looper.speed", "Tempo", "looper", 0.25, 5.0, 1.0, curve="exp", unit="×", preset=False,
+          limits=(0.1, 10.0)),
 ]
 
 # Umbenannte Parameter (alte ID -> neue ID). Gilt fuer Presets, state.json und midi_map.json.
@@ -157,7 +159,33 @@ class ParamStore:
         self.broadcast("values", {"values": dict(self.values), "preset": self.preset_name})
 
     def schema(self) -> list[dict]:
-        return [asdict(p) for p in PARAMS]
+        return [asdict(self.params[p.id]) for p in PARAMS]
+
+    # --- einstellbarer Bereich (z.B. Looper-Tempo) ----------------------
+    def set_range(self, pid: str, lo: float, hi: float) -> bool:
+        p = self.params.get(pid)
+        if p is None or not p.limits:
+            return False
+        a, b = p.limits
+        lo, hi = max(a, min(b, float(lo))), max(a, min(b, float(hi)))
+        if hi <= lo * 1.01:                 # min muss deutlich unter max liegen
+            return False
+        np_ = replace(p, min=round(lo, 3), max=round(hi, 3))
+        self.params[pid] = np_
+        self.dirty = True
+        self.broadcast("schema", asdict(np_))
+        self.set(pid, self.values[pid], source="range")    # aktuellen Wert in den Bereich holen
+        return True
+
+    def schema_of(self, pid: str) -> dict | None:
+        p = self.params.get(pid)
+        return asdict(p) if p else None
+
+    def ranges(self) -> dict:
+        """Geaenderte Bereiche fuer state.json: {pid: [min, max]}"""
+        base = {p.id: p for p in PARAMS}
+        return {pid: [p.min, p.max] for pid, p in self.params.items()
+                if p.limits and (p.min, p.max) != (base[pid].min, base[pid].max)}
 
     # --- Events fuer Web-UI (Server-Sent Events) ------------------------
     def subscribe(self) -> queue.Queue:

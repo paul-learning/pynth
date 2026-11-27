@@ -11,6 +11,7 @@ POST /api/preset/delete{"name": "Mein Sound"}
 POST /api/midi/learn   {"id": "filter.cutoff"}   (id null = abbrechen)
 POST /api/midi/unmap   {"id": "filter.cutoff"}
 POST /api/panic
+POST /api/range        {"id": "looper.speed", "min": 0.25, "max": 5}   Reglerbereich (nur wo erlaubt)
 POST /api/looper       {"cmd": "record"}                   record | stop | play | clear
 POST /api/ctrl/bank    {"bank": 0}                         aktive Knob-Bank (0-3)
 POST /api/ctrl/learn   {"slot": "knob", "index": 0, "wizard": true}   (slot null = abbrechen)
@@ -204,6 +205,9 @@ def make_handler(app: App):
                         return self._json({"error": "cmd"}, 400)
                     app.engine.looper_cmd(cmd)
                     return self._json({"ok": True})
+                if path == "/api/range":
+                    ok = p.set_range(data["id"], data["min"], data["max"])
+                    return self._json({"ok": ok, "param": p.schema_of(data["id"])}, 200 if ok else 400)
                 if path == "/api/panic":
                     app.engine.panic()
                     return self._json({"ok": True})
