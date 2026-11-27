@@ -30,7 +30,9 @@ VELOCITY_SENS = 0.6       # 0 = Anschlag egal, 1 = voll anschlagdynamisch
 PINK_B = np.array([0.049922035, -0.095993537, 0.050612699, -0.004408786])
 PINK_A = np.array([1.0, -2.494956002, 2.017265875, -0.522189400])
 PINK_GAIN = 12.0
-SUB_BLOCK = 256
+SUB_BLOCK = 256           # Filter-Teilblock ohne LFO (Cutoff-Glaettung)
+SUB_BLOCK_LFO = 64        # mit LFO aufs Filter: feiner, sonst "treppt" der Cutoff hoerbar (Knackser)
+HEADROOM = 0.25           # Pegel pro Stimme vor dem Filter; 8 Stimmen bleiben unter dem Limiter
 EXP_K = 6.9   # exp(-6.9) ~ -60 dB: Decay/Release sind "fertig" nach der eingestellten Zeit
 
 
@@ -175,31 +177,20 @@ class Engine:
             r = self._ramp_cache[n] = np.arange(n, dtype=np.float64)
         return r
 
-    def _render_osc(self, wave, freq, phase, n, ramp, pitch_mod):
-        inc = min(freq / self.sr, 0.45)
+    def _render_osc(self, wave, inc, phase, ramp, pitch_mod):
+        """Alle Stimmen auf einmal: inc/phase haben Form (V,), Ergebnis (V, n)."""
+        inc = np.minimum(inc, 0.45)[:, None]
         if pitch_mod is None:
-            ph = phase + inc * (ramp + 1.0)
+            ph = phase[:, None] + inc * (ramp + 1.0)
             dt = inc
         else:
-            dt = inc * pitch_mod
-            ph = phase + np.cumsum(dt)
-        new_phase = float(ph[-1] % 1.0)
+            dt = inc * pitch_mod[None, :]
+            ph = phase[:, None] + np.cumsum(dt, axis=1)
+        new_phase = ph[:, -1] % 1.0
         return dsp.oscillator(wave, ph % 1.0, dt), new_phase
 
-    def _render_voice(self, v: Voice, p, n, ramp, pitch_mod):
-        """Liefert (Oszillator-Signal * Huellkurve, Huellkurve). Noise kommt spaeter dazu."""
+    def _env(self, v: Voice, p, n, ramp):
         sr = self.sr
-        semis = v.note - 69 + self.bend * BEND_RANGE
-        out = np.zeros(n)
-        f1 = 440.0 * 2.0 ** ((semis + 12 * p["osc1.octave"]) / 12.0)
-        sig, v.phase1 = self._render_osc(p["osc1.wave"], f1, v.phase1, n, ramp, pitch_mod)
-        if p["mix.osc1"] > 0:
-            out += p["mix.osc1"] * sig
-        f2 = 440.0 * 2.0 ** ((semis + 12 * p["osc2.octave"] + p["osc2.detune"] / 100.0) / 12.0)
-        sig, v.phase2 = self._render_osc(p["osc2.wave"], f2, v.phase2, n, ramp, pitch_mod)
-        if p["mix.osc2"] > 0:
-            out += p["mix.osc2"] * sig
-
         a, d, s = p["env.attack"] * sr, p["env.decay"] * sr, p["env.sustain"]
         if v.released:
             r = p["env.release"] * sr
@@ -210,8 +201,29 @@ class Engine:
         else:
             env = _gated_env(v.t + ramp, v.start_level, a, d, s)
             v.t += n
-        env *= v.vel
-        return out * env, env
+        return env * v.vel
+
+    def _render_voices(self, voices, p, n, ramp, pitch_mod):
+        """Alle aktiven Stimmen vektorisiert (eine numpy-Rechnung statt eine pro Stimme).
+        Liefert (Summe Oszillatoren * Huellkurve, Summe der Huellkurven)."""
+        sr = self.sr
+        semis = np.array([v.note - 69 for v in voices], dtype=np.float64) + self.bend * BEND_RANGE
+        env = np.stack([self._env(v, p, n, ramp) for v in voices])
+        osc = np.zeros((len(voices), n))
+        for k, octave_key, extra in ((1, "osc1.octave", 0.0), (2, "osc2.octave", p["osc2.detune"] / 100.0)):
+            level = p[f"mix.osc{k}"]
+            attr = f"phase{k}"
+            phase = np.array([getattr(v, attr) for v in voices])
+            inc = 440.0 * 2.0 ** ((semis + 12 * p[octave_key] + extra) / 12.0) / sr
+            if level > 0:
+                sig, phase = self._render_osc(p[f"osc{k}.wave"], inc, phase, ramp, pitch_mod)
+                osc += level * sig
+            else:                                   # stumm: nur Phase weiterdrehen (spart CPU)
+                adv = inc * (pitch_mod.sum() if pitch_mod is not None else n)
+                phase = (phase + adv) % 1.0
+            for v, ph in zip(voices, phase):
+                setattr(v, attr, float(ph))
+        return (osc * env).sum(axis=0), env.sum(axis=0)
 
     def _noise(self, kind: str, n: int) -> np.ndarray:
         white = self.rng.standard_normal(n) * 0.5
@@ -236,33 +248,32 @@ class Engine:
             target = "off"
         pitch_mod = 2.0 ** (lfo * depth * 2.0 / 12.0) if target == "pitch" else None
 
-        # Stimmen
         # Stimmen. Noise wird nur einmal pro Block erzeugt und mit der Summe der
         # Huellkurven multipliziert (klingt gleich, kostet nur einen Bruchteil).
-        mix = np.zeros(n)
-        env_sum = np.zeros(n)
-        for v in [v for v in self.voices if v.active]:
-            sig, env = self._render_voice(v, p, n, ramp, pitch_mod)
-            mix += sig
-            env_sum += env
+        active = [v for v in self.voices if v.active]
+        if active:
+            mix, env_sum = self._render_voices(active, p, n, ramp, pitch_mod)
+        else:
+            mix, env_sum = np.zeros(n), np.zeros(n)
         if p["mix.noise"] > 0:
             mix += p["mix.noise"] * env_sum * self._noise(p["noise.type"], n)
-        mix *= 0.3
+        mix *= HEADROOM
 
         # Filter (Cutoff geglaettet, LFO in Teilbloecken)
         cutoff = p["filter.cutoff"]
         prev = self.cutoff_now if self.cutoff_now is not None else cutoff
         self.cutoff_now = cutoff
-        nsub = max(1, -(-n // SUB_BLOCK))
+        sub = SUB_BLOCK_LFO if target == "filter" else SUB_BLOCK
+        nsub = max(1, -(-n // sub))
         cuts = np.exp(np.linspace(math.log(prev), math.log(cutoff), nsub + 1)[1:])
         if target == "filter":
-            centers = np.minimum(np.arange(nsub) * SUB_BLOCK + SUB_BLOCK // 2, n - 1)
+            centers = np.minimum(np.arange(nsub) * sub + sub // 2, n - 1)
             cuts = cuts * 2.0 ** (lfo[centers] * depth * 3.0)   # +-3 Oktaven
         q = 0.707 * 20.0 ** p["filter.resonance"]
         out = np.empty(n)
         zi = self.filter_zi
         for i in range(nsub):
-            a0, a1 = i * SUB_BLOCK, min(n, (i + 1) * SUB_BLOCK)
+            a0, a1 = i * sub, min(n, (i + 1) * sub)
             b, a = dsp.lowpass_coeffs(float(cuts[i]), q, sr)
             out[a0:a1], zi = lfilter(b, a, mix[a0:a1], zi=zi)
         self.filter_zi = zi

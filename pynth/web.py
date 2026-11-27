@@ -16,6 +16,7 @@ POST /api/ctrl/learn   {"slot": "knob", "index": 0, "wizard": true}   (slot null
 POST /api/ctrl/clear   {"slot": "pad", "index": 2}
 POST /api/ctrl/assign  {"bank": 1, "knob": 7, "id": "lfo.rate"}   (id null = leer)
 POST /api/ctrl/modwheel{"id": "lfo.depth"}
+POST /api/ctrl/takeover{"mode": "jump"}                    "jump" oder "pickup" (Soft-Takeover)
 """
 from __future__ import annotations
 
@@ -165,6 +166,9 @@ def make_handler(app: App):
                     return self._json({"ok": True})
                 if path == "/api/ctrl/modwheel" and c:
                     c.set_modwheel(data.get("id") or None)
+                    return self._json({"ok": True})
+                if path == "/api/ctrl/takeover" and c:
+                    c.set_takeover(str(data.get("mode")))
                     return self._json({"ok": True})
                 if path == "/api/panic":
                     app.engine.panic()

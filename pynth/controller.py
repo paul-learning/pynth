@@ -1,7 +1,8 @@
 """Knob-Baenke fuer einen Controller mit 8 Knobs + 4 Pads (z.B. Samson Graphite M25).
 
 - Die 4 Pads schalten die Bank um, jede Bank belegt die 8 Knobs neu -> 32 Regler.
-- Soft-Takeover: nach einem Bankwechsel (oder Preset-Wechsel) greift ein Knob erst,
+- Knobs sind absolute Potis (0-127). Standard "jump": Knob setzt sofort seinen Wert.
+  Optional "pickup" (Soft-Takeover): nach Bank-/Preset-Wechsel greift ein Knob erst,
   wenn er den aktuellen Wert "abholt" (darueber dreht oder ihn trifft). So springt nichts.
 - Mod-Rad (CC 1) steuert standardmaessig die LFO-Tiefe, direkt ohne Abholen.
 
@@ -21,12 +22,18 @@ log = logging.getLogger("pynth.controller")
 N_KNOBS = 8
 N_PADS = 4
 PICKUP_TOLERANCE = 3 / 127      # so nah am Wert gilt ein Knob als "abgeholt"
+LEARN_MIN_MOVE = 4              # Knob-Learn: erst nach so vielen Schritten Bewegung (Potis zittern um 1-2)
+TAKEOVER_MODES = ("jump", "pickup")
 
 DEFAULT_CONFIG = {
-    # Eingaenge: "cc:<kanal>:<nummer>" oder "note:<kanal>:<nummer>" (Kanal 1-16), None = nicht eingerichtet
+    # Eingaenge: "cc:<kanal>:<nummer>", "note:<kanal>:<nummer>" oder "pc:<kanal>:<nummer>"
+    # (Program Change), Kanal 1-16, None = nicht eingerichtet
     "knobs": [None] * N_KNOBS,
     "pads": [None] * N_PADS,
     "modwheel": {"input": "cc:*:1", "param": "lfo.depth"},     # * = jeder Kanal
+    # "jump": Knob setzt sofort seinen Wert (voller Weg, kann nach Bankwechsel springen)
+    # "pickup": Soft-Takeover, Knob greift erst, wenn er den aktuellen Wert ueberstreicht
+    "takeover": "jump",
     "banks": [
         {"name": "Osz + Mix",
          "params": ["osc1.wave", "osc1.octave", "osc2.wave", "osc2.octave",
@@ -65,6 +72,8 @@ class Controller:
         self._picked = [False] * N_KNOBS
         self._last_x: list[float | None] = [None] * N_KNOBS   # letzte Knob-Stellung 0..1
         self._last_set: list[object] = [None] * N_KNOBS       # Wert, den der Knob zuletzt gesetzt hat
+        self._learn_seen: dict[str, int] = {}                # Learn: erster gesehener CC-Wert je Eingang
+        self.on_learned = None                               # Callback(spec): z.B. alte Direkt-Belegung loeschen
         self._load()
 
     # ----------------------------- Datei -----------------------------
@@ -80,6 +89,8 @@ class Controller:
         for key, n in (("knobs", N_KNOBS), ("pads", N_PADS)):
             vals = list(data.get(key) or [])[:n]
             cfg[key] = vals + [None] * (n - len(vals))
+        if data.get("takeover") in TAKEOVER_MODES:
+            cfg["takeover"] = data["takeover"]
         if isinstance(data.get("modwheel"), dict):
             cfg["modwheel"].update(data["modwheel"])
         banks = data.get("banks")
@@ -103,6 +114,7 @@ class Controller:
         return {"bank": self.bank, "banks": self.config["banks"],
                 "knobs": self.config["knobs"], "pads": self.config["pads"],
                 "modwheel": self.config["modwheel"], "picked": list(self._picked),
+                "takeover": self.config["takeover"],
                 "learn": list(self.learn_slot) if self.learn_slot else None,
                 "wizard": self.wizard}
 
@@ -122,7 +134,30 @@ class Controller:
             self.wizard = wizard
         else:
             self.learn_slot, self.wizard = None, False
+        self._learn_seen = {}
         self._announce()
+
+    def set_takeover(self, mode: str):
+        if mode in TAKEOVER_MODES:
+            self.config["takeover"] = mode
+            self._picked = [False] * N_KNOBS
+            self._save()
+            self._announce()
+
+    def uses_input(self, spec: str) -> bool:
+        return spec in self.config["knobs"] or spec in self.config["pads"]
+
+    def forget_input(self, spec: str):
+        """Eingang wurde anderswo (MIDI-Learn am Regler) belegt -> hier freigeben."""
+        changed = False
+        for key in ("knobs", "pads"):
+            lst = self.config[key]
+            for j, s in enumerate(lst):
+                if s == spec:
+                    lst[j], changed = None, True
+        if changed:
+            self._save()
+            self._announce()
 
     def clear(self, slot: str, index: int):
         key = "knobs" if slot == "knob" else "pads"
@@ -148,12 +183,15 @@ class Controller:
     # ----------------------------- MIDI -----------------------------
     def _learn_input(self, spec: str):
         slot, i = self.learn_slot
-        key = "knobs" if slot == "knob" else "pads"
-        lst = self.config[key]
-        for j, s in enumerate(lst):          # gleicher Eingang darf nur einmal belegt sein
-            if s == spec:
-                lst[j] = None
-        lst[i] = spec
+        for key in ("knobs", "pads"):        # gleicher Eingang darf nur einmal belegt sein
+            lst = self.config[key]
+            for j, s in enumerate(lst):
+                if s == spec:
+                    lst[j] = None
+        self.config["knobs" if slot == "knob" else "pads"][i] = spec
+        self._learn_seen = {}
+        if self.on_learned:
+            self.on_learned(spec)
         log.info("Controller-Learn: %s %d <- %s", slot, i + 1, spec)
         if self.wizard:                      # Knob 1..8, dann Pad 1..4
             if slot == "knob" and i + 1 < N_KNOBS:
@@ -168,6 +206,21 @@ class Controller:
             self.learn_slot = None
         self._save()
         self._announce()
+
+    def _press_pad(self, spec: str) -> bool:
+        for i, s in enumerate(self.config["pads"]):
+            if s == spec:
+                self.set_bank(i)
+                return True
+        return False
+
+    def handle_program(self, channel: int, program: int) -> bool:
+        """Program Change (manche Controller-Pads senden das). True = verarbeitet."""
+        spec = f"pc:{channel}:{program}"
+        if self.learn_slot and self.learn_slot[0] == "pad":
+            self._learn_input(spec)
+            return True
+        return self._press_pad(spec)
 
     def handle_note(self, channel: int, note: int, velocity: int) -> bool:
         """Note-On. True = gehoert zum Controller (Pad), nicht spielen."""
@@ -189,8 +242,7 @@ class Controller:
         x = value / 127.0
         spec = f"cc:{channel}:{cc}"
         if self.learn_slot:
-            if self.learn_slot[0] == "knob" or value > 0:     # Pads als CC: nur Druecken
-                self._learn_input(spec)
+            self._learn_cc(spec, value)
             return True
         for i, s in enumerate(self.config["pads"]):
             if _matches(s, "cc", channel, cc):
@@ -207,6 +259,24 @@ class Controller:
             return True
         return False
 
+    def _learn_cc(self, spec: str, value: int):
+        """Nur echte Bewegungen lernen: ein zitterndes Poti darf kein Pad werden."""
+        first = self._learn_seen.setdefault(spec, value)
+        slot, i = self.learn_slot
+        if slot == "knob":
+            if abs(value - first) >= LEARN_MIN_MOVE:
+                self._learn_input(spec)
+            return
+        # Pad als CC: Druecken = Sprung auf >= 64 (typisch 0 -> 127). Eingaenge, die
+        # schon als Knob belegt sind, oder das Mod-Rad zaehlen nicht.
+        if spec in self.config["knobs"] or _matches(self.config["modwheel"].get("input"),
+                                                    "cc", *map(int, spec.split(":")[1:])):
+            return
+        if value >= 64 and (value - first >= 64 or (value == first == 127)):
+            self._learn_input(spec)
+        elif value < 64:
+            self._learn_seen[spec] = value
+
     def _knob(self, i: int, x: float):
         pid = self.config["banks"][self.bank]["params"][i]
         last_x, self._last_x[i] = self._last_x[i], x
@@ -216,7 +286,9 @@ class Controller:
         cur = self.params.values[pid]
         if self._picked[i] and cur != self._last_set[i]:
             self._picked[i] = False          # Wert wurde woanders geaendert (Web, Preset)
-        if not self._picked[i]:
+        if self.config["takeover"] == "jump":
+            self._picked[i] = True
+        elif not self._picked[i]:
             c = p.to_norm(cur)
             crossed = last_x is not None and (last_x - c) * (x - c) <= 0
             if p.from_norm(x) == cur or abs(x - c) <= PICKUP_TOLERANCE or crossed:

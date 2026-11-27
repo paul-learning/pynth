@@ -34,6 +34,18 @@ class MidiManager:
         self._last_shown = 0.0
         self._stop = threading.Event()
         self._load_map()
+        if controller is not None:
+            controller.on_learned = self._forget_spec
+
+    def _forget_spec(self, spec: str):
+        """Eingang wurde als Controller-Knob/Pad gelernt -> alte Direkt-Belegung (L) loeschen,
+        sonst steuert ein Knopf je nach Weg mal das eine, mal das andere."""
+        kind, _, key = spec.partition(":")
+        if kind == "cc" and key in self.mapping:
+            log.info("MIDI-Map: %s -> %s entfernt (jetzt Controller-Knob)", key, self.mapping[key])
+            del self.mapping[key]
+            self._save_map()
+            self._announce()
 
     # ----------------------------- Mapping -----------------------------
     def _load_map(self):
@@ -91,6 +103,11 @@ class MidiManager:
                     self.engine.note_on(msg.note, msg.velocity)
                 else:
                     self.engine.note_off(msg.note)
+            elif t == "program_change":
+                ch = msg.channel + 1
+                self._show(f"Program Change {msg.program} (Kanal {ch})")
+                if ctl:
+                    ctl.handle_program(ch, msg.program)
             elif t == "pitchwheel":
                 self.engine.pitch_bend(msg.pitch / 8192.0)
             elif t == "control_change":
@@ -101,6 +118,8 @@ class MidiManager:
                 if self.learn_target:
                     self.mapping = {k: v for k, v in self.mapping.items() if v != self.learn_target}
                     self.mapping[key] = self.learn_target
+                    if ctl:
+                        ctl.forget_input(f"cc:{key}")      # Knopf ist jetzt direkt belegt
                     log.info("MIDI-Learn: %s -> %s", key, self.learn_target)
                     self.learn_target = None
                     self._save_map()
