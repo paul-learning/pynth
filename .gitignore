@@ -15,3 +15,6 @@ venv/
 # Renders / Demos
 *.wav
 backups/
+
+# uebersetzter C-Kern
+pynth/_build/

@@ -10,9 +10,11 @@ Weitere Modi:
 from __future__ import annotations
 
 import argparse
+import gc
 import logging
 import os
 import signal
+import sys
 import threading
 import time
 import wave
@@ -20,6 +22,7 @@ from pathlib import Path
 
 import numpy as np
 
+from . import fast
 from .engine import Engine
 from .params import ParamStore
 from .presets import PresetStore, flatten, nest
@@ -39,8 +42,12 @@ def save_state(state_file, params):
 def parse_args():
     ap = argparse.ArgumentParser(prog="pynth", description="Raspberry-Pi-Synth")
     ap.add_argument("--samplerate", type=int, default=44100)
-    ap.add_argument("--blocksize", type=int, default=8192,
+    ap.add_argument("--blocksize", type=int, default=512,
                     help="Samples pro Audio-Block (kleiner = weniger Latenz, mehr Underrun-Risiko)")
+    ap.add_argument("--latency", default="high",
+                    help="ALSA-Puffer: 'low', 'high' oder Sekunden (z.B. 0.03). Mehr = sicherer, aber traeger")
+    ap.add_argument("--rt-prio", type=int, default=70,
+                    help="Echtzeit-Prioritaet des Audio-Threads (SCHED_FIFO 1-95, 0 = aus)")
     ap.add_argument("--device", default=None, help="Audio-Geraet (Name oder Index, siehe --list-devices)")
     ap.add_argument("--channels", type=int, default=1, help="1 = mono, 2 = gleiches Signal auf beide Kanaele")
     ap.add_argument("--host", default="0.0.0.0")
@@ -84,27 +91,41 @@ def bench(args):
     params.set("fx.delay_mix", 0.3)
     params.set("fx.reverb_mix", 0.3)
     params.set("lfo.depth", 0.5)
+    params.set("lfo.target", "filter")
+    params.set("env.release", 10.0)            # Stimmen bleiben die ganze Messung ueber aktiv
     eng = Engine(params, args.samplerate)
-    for n in (48, 52, 55, 59, 62, 64, 67, 71):
-        eng.note_on(n, 100)
-    n = args.blocksize
-    eng.render(n)
-    runs = 20
-    t0 = time.perf_counter()
-    for _ in range(runs):
-        eng.render(n)
-    per = (time.perf_counter() - t0) / runs
-    budget = n / args.samplerate
-    print(f"Block {n} Samples = {budget * 1000:.0f} ms Audio, 8 Stimmen + FX: "
-          f"{per * 1000:.1f} ms Rechenzeit -> {per / budget * 100:.0f}% CPU-Last")
-    for bs in (512, 1024, 2048, 4096):
+    print(f"DSP-Kern: {'C (schnell)' if fast.lib else 'numpy (C-Kern nicht verfuegbar)'}")
+    print("8 Stimmen, LFO aufs Filter, Delay + Hall. Last = Rechenzeit / Blockdauer, "
+          "Spitze = langsamster Block (der entscheidet ueber Knackser)")
+    for bs in (256, 512, 1024, 2048):
+        for v in eng.voices:
+            v.active = False
+        for n in (48, 52, 55, 59, 62, 64, 67, 71):
+            eng.note_on(n, 100)
         eng.render(bs)
-        t0 = time.perf_counter()
+        budget = bs / args.samplerate
+        runs = max(50, int(2.0 / budget))      # ~2 s Audio pro Blockgroesse
+        times = []
         for _ in range(runs):
+            t0 = time.perf_counter()
             eng.render(bs)
-        per = (time.perf_counter() - t0) / runs
-        print(f"  blocksize {bs:5d}: {per / (bs / args.samplerate) * 100:5.0f}% Last "
-              f"({bs / args.samplerate * 1000:.0f} ms Latenz pro Block)")
+            times.append(time.perf_counter() - t0)
+        times.sort()
+        mean = sum(times) / runs
+        print(f"  blocksize {bs:5d} ({budget * 1000:4.1f} ms): {mean / budget * 100:4.0f}% Last, "
+              f"Spitze {times[-1] / budget * 100:4.0f}%, "
+              f"99% der Bloecke unter {times[int(runs * 0.99) - 1] / budget * 100:4.0f}%")
+
+
+def make_realtime(prio: int):
+    """Audio-Thread auf SCHED_FIFO setzen, damit Web/MIDI/WLAN ihn nicht ausbremsen.
+    Braucht LimitRTPRIO im systemd-Dienst oder die Gruppe audio mit rtprio."""
+    try:
+        os.sched_setscheduler(0, os.SCHED_FIFO, os.sched_param(prio))   # 0 = dieser Thread
+        log.info("Audio-Thread laeuft mit Echtzeit-Prioritaet %d", prio)
+    except (PermissionError, OSError, AttributeError) as e:
+        log.warning("Keine Echtzeit-Prioritaet fuer Audio (%s). Dienst-Datei neu kopieren, "
+                    "siehe README 'Latenz'", e)
 
 
 def render_demo(args, params):
@@ -176,8 +197,12 @@ def main():
     if not args.no_audio:
         sd = import_sounddevice()
         ch = args.channels
+        rt_pending = [args.rt_prio > 0]
 
         def callback(outdata, frames, time_info, status):
+            if rt_pending[0]:                  # einmalig im Audio-Thread selbst
+                rt_pending[0] = False
+                make_realtime(args.rt_prio)
             if status.output_underflow:
                 engine.stats["underruns"] += 1
             try:
@@ -189,11 +214,18 @@ def main():
             outdata[:] = block[:, None] if ch > 1 else block.reshape(-1, 1)
 
         device = int(args.device) if args.device and args.device.isdigit() else args.device
-        stream = sd.OutputStream(samplerate=args.samplerate, blocksize=args.blocksize,
+        try:
+            latency = float(args.latency)
+        except ValueError:
+            latency = args.latency
+        stream = sd.OutputStream(samplerate=args.samplerate, blocksize=args.blocksize, latency=latency,
                                  dtype="float32", channels=ch, device=device, callback=callback)
         stream.start()
         audio_info["audio"] = str(sd.query_devices(stream.device)["name"])
-        log.info("Audio laeuft: %s, %d Hz, Block %d", audio_info["audio"], args.samplerate, args.blocksize)
+        audio_info["latency_ms"] = round(stream.latency * 1000)
+        log.info("Audio laeuft: %s, %d Hz, Block %d, Ausgabe-Latenz %.0f ms, DSP-Kern %s",
+                 audio_info["audio"], args.samplerate, args.blocksize, stream.latency * 1000,
+                 "C" if fast.lib else "numpy")
 
     else:                                              # ohne Soundkarte: Engine trotzdem takten
         def dummy_audio():
@@ -201,6 +233,12 @@ def main():
                 engine.render(args.blocksize)
                 time.sleep(args.blocksize / args.samplerate)
         threading.Thread(target=dummy_audio, name="dummy-audio", daemon=True).start()
+
+    # Weniger Aussetzer im Audio-Thread: andere Threads geben den GIL frueher ab,
+    # und der Garbage Collector muss die beim Start angelegten Objekte nie mehr pruefen.
+    sys.setswitchinterval(0.001)
+    gc.collect()
+    gc.freeze()
 
     from .web import App, serve
     httpd = serve(App(params, engine, presets, midi, ROOT / "web", audio_info, controller), args.host, args.port)

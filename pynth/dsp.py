@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import math
+import ctypes
 import numpy as np
+
+from . import fast
 
 TWO_PI = 2.0 * math.pi
 
@@ -70,6 +73,9 @@ class FeedbackLine:
     def __init__(self, size: int):
         self.buf = np.zeros(size)
         self.w = 0
+        self._w = ctypes.c_int(0)
+        self._w_addr = ctypes.addressof(self._w)
+        self._buf_addr = fast.ptr(self.buf)
 
     def process(self, x: np.ndarray, d: int, g: float):
         size = len(self.buf)
@@ -77,6 +83,13 @@ class FeedbackLine:
         n = len(x)
         v = np.empty(n)
         vd = np.empty(n)
+        if fast.lib is not None:
+            x = np.ascontiguousarray(x, dtype=np.float64)
+            self._w.value = self.w
+            fast.lib.feedback_line(n, fast.ptr(x), fast.ptr(v), fast.ptr(vd), self._buf_addr,
+                                   size, self._w_addr, d, float(g))
+            self.w = self._w.value
+            return v, vd
         i = 0
         while i < n:
             c = min(d, n - i)

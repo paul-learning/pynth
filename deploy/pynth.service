@@ -2,6 +2,7 @@
 #   sudo cp ~/pynth/deploy/pynth.service /etc/systemd/system/
 #   sudo systemctl daemon-reload && sudo systemctl enable --now pynth
 #   Logs: journalctl -u pynth -f
+# Nach Aenderungen an dieser Datei: erneut kopieren + daemon-reload + restart.
 [Unit]
 Description=Pynth Synthesizer
 After=network-online.target sound.target bluetooth.target
@@ -10,11 +11,16 @@ After=network-online.target sound.target bluetooth.target
 User=pynth
 Group=audio
 WorkingDirectory=/home/pynth/pynth
-ExecStart=/home/pynth/pynth_venv/bin/python -m pynth --blocksize 1024
+# CPU immer auf vollem Takt: sonst taktet der Pi bei wenig Last runter und braucht
+# beim naechsten Akkord ein paar ms zum Hochfahren -> Knackser. Laeuft als root (+).
+ExecStartPre=+/bin/sh -c 'for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo performance > "$g"; done || true'
+ExecStart=/home/pynth/pynth_venv/bin/python -m pynth --blocksize 512
 Restart=on-failure
 RestartSec=3
 Nice=-10
+# Echtzeit-Prioritaet fuer den Audio-Thread (pynth setzt SCHED_FIFO 70 selbst)
 LimitRTPRIO=95
+LimitMEMLOCK=infinity
 
 [Install]
 WantedBy=multi-user.target

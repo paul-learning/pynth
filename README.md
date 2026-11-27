@@ -50,7 +50,7 @@ python3 -m venv ~/pynth_venv                 # falls noch nicht vorhanden
 ~/pynth_venv/bin/pip install -r ~/pynth/requirements.txt
 cd ~/pynth
 ~/pynth_venv/bin/python -m pynth --bench              # CPU-Last messen
-~/pynth_venv/bin/python -m pynth --blocksize 1024     # starten
+~/pynth_venv/bin/python -m pynth                     # starten (Block 512)
 ```
 
 **Update:** `cd ~/pynth && git pull` und danach `sudo systemctl restart pynth`.
@@ -71,22 +71,38 @@ Nützliche Optionen:
 
 | Option | Zweck |
 |---|---|
-| `--blocksize 2048` | weniger Latenz (Standard 8192 = 186 ms) |
+| `--blocksize 1024` | Samples pro Block (Standard 512 = 12 ms) |
+| `--latency low` | ALSA-Puffer kleiner (`low`, `high` = Standard, oder Sekunden) |
+| `--rt-prio 0` | Echtzeit-Priorität des Audio-Threads aus (Standard 70) |
 | `--device 1` | anderes Audio-Gerät, z.B. USB-Interface (`--list-devices`) |
 | `--channels 2` | falls ein Interface kein Mono kann |
 | `--preset "Warm Pad"` | Preset beim Start |
 | `--no-audio` | nur UI testen, z.B. am Laptop |
 | `--render demo.wav` | Demo ohne Soundkarte rendern |
 
-Autostart: siehe `deploy/pynth.service` (Kommentar oben in der Datei, startet mit `--blocksize 1024`).
+Autostart: siehe `deploy/pynth.service` (Kommentar oben in der Datei, startet mit `--blocksize 512`).
 
 ## Latenz
 
-Die alten Underruns bei kleinen Blöcken kamen sehr wahrscheinlich vom langsamen Code
-(`np.linspace`, Python-Logik pro Sample). Die neue Engine braucht für 8 Stimmen + FX auf
-einem Laptop ~3 % CPU bei 8192 Samples. Auf dem Pi mit `--bench` prüfen: liegt die Last
-bei 2048 unter ~50 %, lohnt sich `--blocksize 2048` (46 ms) oder sogar 1024 (23 ms).
-Die Web-UI zeigt CPU-Last und Underruns live an.
+Die Schleifen pro Sample (Oszillatoren, Hüllkurven, Filter, Delay, Hall) laufen in einem
+kleinen C-Kern (`pynth/_kernel.c`). Pynth übersetzt ihn beim ersten Start selbst mit `cc`
+nach `pynth/_build/` (dauert ein paar Sekunden). Fehlt der Compiler (`sudo apt install gcc`),
+rechnet die Engine wie früher mit numpy, klingt gleich, braucht aber ca. 3× so viel CPU.
+Vergleichen: `PYNTH_NO_C=1 python -m pynth --bench`.
+
+Das Filter ist im C-Kern ein State-Variable-Filter mit Cutoff pro Sample: gleicher Klang
+wie der Biquad, aber kein Knacksen mehr bei hoher LFO-Tiefe. Square- und Saw-LFO werden an
+den Sprüngen ~2 ms geglättet.
+
+Gegen Aussetzer zusätzlich:
+* Der Audio-Thread setzt sich selbst auf Echtzeit-Priorität (SCHED_FIFO 70, braucht
+  `LimitRTPRIO` im Dienst), der Python-GIL wird alle 1 ms abgegeben, der Garbage Collector
+  prüft die Start-Objekte nicht mehr.
+* `deploy/pynth.service` stellt den CPU-Takt beim Start auf `performance`.
+
+`--bench` zeigt pro Blockgröße die mittlere Last und den langsamsten Block ("Spitze").
+Die Spitze sollte deutlich unter 100 % bleiben. Die Web-UI zeigt CPU-Last, Underruns
+und die echte Ausgabe-Latenz (Block + ALSA-Puffer) live an.
 
 ## MIDI
 

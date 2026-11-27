@@ -20,7 +20,7 @@ import time
 import numpy as np
 from scipy.signal import lfilter
 
-from . import dsp
+from . import dsp, fast
 from .looper import Looper
 from .params import ParamStore
 
@@ -32,6 +32,7 @@ PINK_A = np.array([1.0, -2.494956002, 2.017265875, -0.522189400])
 PINK_GAIN = 12.0
 SUB_BLOCK = 256           # Filter-Teilblock ohne LFO (Cutoff-Glaettung)
 SUB_BLOCK_LFO = 64        # mit LFO aufs Filter: feiner, sonst "treppt" der Cutoff hoerbar (Knackser)
+LFO_SMOOTH_S = 0.002      # Square/Saw-LFO: Spruenge ueber ~2 ms glaetten (One-Pole)
 HEADROOM = 0.25           # Pegel pro Stimme vor dem Filter; 8 Stimmen bleiben unter dem Limiter
 EXP_K = 6.9   # exp(-6.9) ~ -60 dB: Decay/Release sind "fertig" nach der eingestellten Zeit
 
@@ -76,7 +77,11 @@ class Engine:
         self.bend_now = 0.0       # Pitchbend am Ende des letzten Blocks (fuer weichen Verlauf)
         self.pedal = False
         self.lfo_phase = 0.0
-        self.filter_zi = np.zeros(2)
+        self.filter_zi = np.zeros(2)          # Biquad-Zustand (numpy-Pfad)
+        self.svf_state = np.zeros(2)          # SVF-Zustand (C-Pfad)
+        self.lfo_zi = np.zeros(1)             # Glaettung fuer Square/Saw-LFO
+        c = math.exp(-1.0 / (LFO_SMOOTH_S * samplerate))
+        self.lfo_smooth = (np.array([1.0 - c]), np.array([1.0, -c]))
         self.cutoff_now: float | None = None
         self.volume_now: float | None = None
         self.delay = dsp.FeedbackLine(int(1.6 * samplerate))
@@ -248,6 +253,40 @@ class Engine:
                 setattr(v, attr, float(ph))
         return (osc * env).sum(axis=0), env.sum(axis=0)
 
+    def _render_voices_c(self, voices, p, n, pitch_mod):
+        """Wie _render_voices, aber die Schleife pro Sample laeuft im C-Kern."""
+        sr = self.sr
+        a, d, s = p["env.attack"] * sr, p["env.decay"] * sr, p["env.sustain"]
+        r = p["env.release"] * sr
+        w1, w2 = fast.WAVE_ID.get(p["osc1.wave"], 0), fast.WAVE_ID.get(p["osc2.wave"], 0)
+        l1, l2 = float(p["mix.osc1"]), float(p["mix.osc2"])
+        o1 = 12 * p["osc1.octave"]
+        o2 = 12 * p["osc2.octave"] + p["osc2.detune"] / 100.0
+        k = 440.0 / sr
+        vp, ph = [], []
+        for v in voices:
+            semi = v.note - 69
+            vp += (w1, min(k * 2.0 ** ((semi + o1) / 12.0), 0.45), l1,
+                   w2, min(k * 2.0 ** ((semi + o2) / 12.0), 0.45), l2,
+                   1.0 if v.released else 0.0, v.t_rel if v.released else v.t,
+                   v.start_level, a, d, s, v.rel_level, r, v.vel, 0.0)
+            ph += (v.phase1, v.phase2)
+        vp = np.array(vp)
+        ph = np.array(ph)
+        mix, env_sum = np.zeros(n), np.zeros(n)
+        pm = fast.ptr(pitch_mod) if pitch_mod is not None else None
+        fast.lib.render_voices(len(voices), n, fast.ptr(vp), fast.ptr(ph), pm,
+                               fast.ptr(mix), fast.ptr(env_sum))
+        for i, v in enumerate(voices):
+            v.phase1, v.phase2 = float(ph[2 * i]), float(ph[2 * i + 1])
+            if v.released:
+                v.t_rel += n
+                if v.t_rel >= r:
+                    v.active = False
+            else:
+                v.t += n
+        return mix, env_sum
+
     def _noise(self, kind: str, n: int) -> np.ndarray:
         white = self.rng.standard_normal(n) * 0.5
         if kind != "pink":
@@ -267,6 +306,8 @@ class Engine:
         # LFO
         rate = p["lfo.rate"]
         lfo = dsp.lfo_wave(p["lfo.wave"], (self.lfo_phase + ramp * rate / sr) % 1.0)
+        if p["lfo.wave"] in ("square", "saw"):      # Spruenge ~2 ms weich machen, sonst Klick
+            lfo, self.lfo_zi = lfilter(*self.lfo_smooth, lfo, zi=self.lfo_zi)
         self.lfo_phase = (self.lfo_phase + n * rate / sr) % 1.0
         target, depth = p["lfo.target"], p["lfo.depth"]
         if depth <= 0:
@@ -282,7 +323,9 @@ class Engine:
         # Stimmen. Noise wird nur einmal pro Block erzeugt und mit der Summe der
         # Huellkurven multipliziert (klingt gleich, kostet nur einen Bruchteil).
         active = [v for v in self.voices if v.active]
-        if active:
+        if active and fast.lib is not None:
+            mix, env_sum = self._render_voices_c(active, p, n, pitch_mod)
+        elif active:
             mix, env_sum = self._render_voices(active, p, n, ramp, pitch_mod)
         else:
             mix, env_sum = np.zeros(n), np.zeros(n)
@@ -290,17 +333,39 @@ class Engine:
             mix += p["mix.noise"] * env_sum * self._noise(p["noise.type"], n)
         mix *= HEADROOM
 
-        # Filter (Cutoff geglaettet, LFO in Teilbloecken)
+        # Filter: C-Kern mit Cutoff pro Sample (SVF), sonst Biquad in Teilbloecken
         cutoff = p["filter.cutoff"]
         prev = self.cutoff_now if self.cutoff_now is not None else cutoff
         self.cutoff_now = cutoff
+        q = 0.707 * 20.0 ** p["filter.resonance"]
+        if fast.lib is not None:
+            out = self._filter_c(mix, n, ramp, prev, cutoff, q, lfo if target == "filter" else None, depth)
+        else:
+            out = self._filter_np(mix, n, prev, cutoff, q, lfo if target == "filter" else None, depth)
+        return self._post(out, p, n, ramp, lfo, target, depth, t0)
+
+    def _filter_c(self, mix, n, ramp, prev, cutoff, q, lfo, depth):
+        """SVF mit Cutoff pro Sample: weicher Verlauf, auch bei voller LFO-Tiefe."""
+        lc0 = math.log(prev)
+        logc = lc0 + (math.log(cutoff) - lc0) * ((ramp + 1.0) / n)
+        if lfo is not None:
+            logc = logc + lfo * (depth * 3.0 * math.log(2.0))     # +-3 Oktaven
+        cuts = np.exp(logc)
+        np.clip(cuts, 20.0, 0.45 * self.sr, out=cuts)
+        out = np.empty(n)
+        fast.lib.svf_lowpass(n, fast.ptr(mix), fast.ptr(out), fast.ptr(cuts),
+                             1.0 / q, float(self.sr), fast.ptr(self.svf_state))
+        return out
+
+    def _filter_np(self, mix, n, prev, cutoff, q, lfo, depth):
+        sr = self.sr
+        target = "filter" if lfo is not None else ""
         sub = SUB_BLOCK_LFO if target == "filter" else SUB_BLOCK
         nsub = max(1, -(-n // sub))
         cuts = np.exp(np.linspace(math.log(prev), math.log(cutoff), nsub + 1)[1:])
         if target == "filter":
             centers = np.minimum(np.arange(nsub) * sub + sub // 2, n - 1)
             cuts = cuts * 2.0 ** (lfo[centers] * depth * 3.0)   # +-3 Oktaven
-        q = 0.707 * 20.0 ** p["filter.resonance"]
         out = np.empty(n)
         zi = self.filter_zi
         for i in range(nsub):
@@ -308,6 +373,10 @@ class Engine:
             b, a = dsp.lowpass_coeffs(float(cuts[i]), q, sr)
             out[a0:a1], zi = lfilter(b, a, mix[a0:a1], zi=zi)
         self.filter_zi = zi
+        return out
+
+    def _post(self, out, p, n, ramp, lfo, target, depth, t0):
+        sr = self.sr
 
         # Master-Lautstaerke (gerampt gegen Zipper) + Tremolo
         vol = p["master.volume"]
