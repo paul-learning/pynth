@@ -158,6 +158,7 @@ def main():
 
     from .controller import Controller
     controller = Controller(params, data / "controller.json")
+    controller.on_transport = engine.looper_cmd        # Record/Stop/Play -> Looper
     midi = None
     if not args.no_midi:
         from .midi import MidiManager

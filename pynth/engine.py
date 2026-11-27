@@ -21,6 +21,7 @@ import numpy as np
 from scipy.signal import lfilter
 
 from . import dsp
+from .looper import Looper
 from .params import ParamStore
 
 MAX_VOICES = 8            # feste Polyphonie
@@ -37,7 +38,7 @@ EXP_K = 6.9   # exp(-6.9) ~ -60 dB: Decay/Release sind "fertig" nach der eingest
 
 class Voice:
     __slots__ = ("active", "note", "vel", "phase1", "phase2", "t", "start_level",
-                 "released", "t_rel", "rel_level", "age", "held_by_pedal")
+                 "released", "t_rel", "rel_level", "age", "held_by_pedal", "src")
 
     def __init__(self):
         self.active = False
@@ -52,6 +53,7 @@ class Voice:
         self.rel_level = 0.0
         self.age = 0
         self.held_by_pedal = False
+        self.src = 0            # 0 = live gespielt, 1 = Looper (eigene Stimmen, stoeren sich nicht)
 
 
 def _gated_env(t: np.ndarray, start: float, a: float, d: float, s: float) -> np.ndarray:
@@ -83,6 +85,7 @@ class Engine:
         self.pink_zi = np.zeros(3)
         self._age = 0
         self._ramp_cache: dict[int, np.ndarray] = {}
+        self.looper = Looper(samplerate, notify=lambda info: params.broadcast("looper", info))
         self.stats = {"load": 0.0, "voices": 0, "peak": 0.0, "blocks": 0, "underruns": 0}
 
     # ---------- thread-sichere Steuerung (MIDI-Thread, Web-Thread) ----------
@@ -105,6 +108,10 @@ class Engine:
     def panic(self):
         self.events.put(("panic", 0, 0))
 
+    def looper_cmd(self, cmd: str):
+        """"record" | "stop" | "play" | "clear" (wird im Audio-Thread ausgefuehrt)"""
+        self.events.put(("loop", cmd, 0))
+
     # ---------------------------- Voice-Handling ----------------------------
     def _level(self, v: Voice, p) -> float:
         if not v.active:
@@ -121,10 +128,10 @@ class Engine:
         v.t_rel = 0
         v.held_by_pedal = False
 
-    def _alloc(self, note: int, p) -> Voice:
+    def _alloc(self, note: int, p, src: int = 0) -> Voice:
         pool = self.voices
         for v in pool:                                  # gleiche Note -> neu anschlagen
-            if v.active and v.note == note:
+            if v.active and v.note == note and v.src == src:
                 return v
         for v in pool:                                  # freie Stimme
             if not v.active:
@@ -140,35 +147,51 @@ class Engine:
                 kind, note, val = self.events.get_nowait()
             except queue.Empty:
                 return
-            if kind == "on":
-                v = self._alloc(note, p)
-                v.start_level = self._level(v, p)       # Start ab aktuellem Pegel: kein Klick
-                if not v.active:
-                    v.phase1 = v.phase2 = 0.0
-                v.vel = (1.0 - VELOCITY_SENS) + VELOCITY_SENS * (val / 127.0)
-                v.note, v.t, v.released, v.held_by_pedal = note, 0, False, False
-                v.active = True
-                self._age += 1
-                v.age = self._age
-            elif kind == "off":
+            if kind == "loop":
+                if self.looper.command(note):
+                    self._loop_notes_off(p)
+                continue
+            if kind in ("on", "off", "pedal"):
+                self.looper.capture(kind, note, val)
+            self._apply(kind, note, val, p)
+
+    def _loop_notes_off(self, p):
+        for v in self.voices:
+            if v.active and v.src == 1 and not v.released:
+                self._release(v, p)
+
+    def _apply(self, kind, note, val, p, src: int = 0):
+        """Ein Ereignis ausfuehren. src 0 = live, 1 = Looper (eigene Stimmen)."""
+        if kind == "on":
+            v = self._alloc(note, p, src)
+            v.start_level = self._level(v, p)       # Start ab aktuellem Pegel: kein Klick
+            if not v.active:
+                v.phase1 = v.phase2 = 0.0
+            v.vel = (1.0 - VELOCITY_SENS) + VELOCITY_SENS * (val / 127.0)
+            v.note, v.t, v.released, v.held_by_pedal, v.src = note, 0, False, False, src
+            v.active = True
+            self._age += 1
+            v.age = self._age
+        elif kind == "off":
+            for v in self.voices:
+                if v.active and v.note == note and v.src == src and not v.released:
+                    if self.pedal and src == 0:     # Pedal gilt nur live (der Looper nimmt es mit auf)
+                        v.held_by_pedal = True
+                    else:
+                        self._release(v, p)
+        elif kind == "bend":
+            self.bend = val
+        elif kind == "pedal":
+            self.pedal = val
+            if not val:
                 for v in self.voices:
-                    if v.active and v.note == note and not v.released:
-                        if self.pedal:
-                            v.held_by_pedal = True
-                        else:
-                            self._release(v, p)
-            elif kind == "bend":
-                self.bend = val
-            elif kind == "pedal":
-                self.pedal = val
-                if not val:
-                    for v in self.voices:
-                        if v.active and v.held_by_pedal and not v.released:
-                            self._release(v, p)
-            elif kind == "panic":
-                for v in self.voices:
-                    v.active = False
-                self.pedal = False
+                    if v.active and v.held_by_pedal and not v.released:
+                        self._release(v, p)
+        elif kind == "panic":
+            for v in self.voices:
+                v.active = False
+            self.pedal = False
+            self.looper.command("stop")
 
     # ------------------------------- Rendering ------------------------------
     def _ramp(self, n: int) -> np.ndarray:
@@ -236,6 +259,8 @@ class Engine:
         t0 = time.perf_counter()
         p = dict(self.params.values)        # Schnappschuss: Werte aendern sich nicht mitten im Block
         self._handle_events(p)
+        for kind, note, vel in self.looper.tick(n):     # Schleife: Noten wie live gespielt
+            self._apply(kind, note, vel, p, src=1)
         sr = self.sr
         ramp = self._ramp(n)
 

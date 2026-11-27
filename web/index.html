@@ -66,6 +66,21 @@
              max-height:220px; overflow:auto; font-size:11px; color:var(--fg); white-space:pre; user-select:text; }
   #midilog:empty::before { content:'noch nichts empfangen'; color:var(--dim); }
   .legend { color:var(--dim); font-size:12px; margin:8px 0 0; }
+  #looper { margin:0 14px 12px; }
+  #looper .tp { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  #looper .tp button { min-width:84px; font-size:15px; padding:8px 12px; }
+  #looper .tp button.on { color:#111; font-weight:700; }
+  #lrec.on { background:var(--learn); border-color:var(--learn); }
+  #lplay.on { background:#46a758; border-color:#46a758; }
+  #lrec.armed { background:var(--learn); border-color:var(--learn); color:#fff; animation:blink 1s infinite; }
+  #lbar { height:8px; background:#0e1013; border:1px solid var(--line); border-radius:4px; margin:10px 0 6px; overflow:hidden; }
+  #lbar div { height:100%; width:0; background:var(--acc); }
+  #ltext { font-size:12px; color:var(--dim); }
+  #looppill { padding:6px 12px; border-radius:14px; font-weight:700; font-size:13px; color:#111; }
+  #looppill.rec { background:var(--learn); color:#fff; }
+  #looppill.armed { background:var(--learn); color:#fff; animation:blink 1s infinite; }
+  #looppill.play { background:#46a758; }
+  #looppill.dub { background:#e5484d; color:#fff; box-shadow:0 0 0 3px #46a758 inset; }
   .badge { font-size:10px; color:#111; background:var(--bank, var(--acc)); border-radius:3px; padding:0 4px; margin-left:4px; }
 </style>
 </head>
@@ -77,10 +92,29 @@
   <button id="save">Speichern</button>
   <button id="del" title="Ausgewähltes Preset löschen">Löschen</button>
   <button id="panic" title="Alle Noten aus">Panic</button>
+  <span id="looppill" hidden></span>
   <span id="bankpill" title="Aktive Knob-Bank (Pads am Controller schalten um)" hidden></span>
   <div id="status">verbinde ...</div>
 </header>
 <div id="midiinfo"></div>
+<section class="card" id="looper">
+  <h2>Looper</h2>
+  <div class="tp">
+    <button id="lrec" title="Record: Aufnahme startet mit der ersten Note. Während die Schleife läuft: Overdub (dazuspielen)">● Rec</button>
+    <button id="lstop" title="Stop">■ Stop</button>
+    <button id="lplay" title="Play: Schleife von vorn abspielen">▶ Play</button>
+    <button id="lclear" title="Schleife löschen">Löschen</button>
+  </div>
+  <div id="lbar"><div></div></div>
+  <div id="ltext"></div>
+  <details>
+    <summary class="legend" style="cursor:pointer">Tasten am Controller anlernen</summary>
+    <p class="legend">Feld anklicken, dann die Taste am Controller drücken. Rechtsklick löscht.
+      Tasten, die MMC senden, gehen ohne Anlernen. Eine Taste, die vorher die Bank umgeschaltet hat,
+      wird dabei als Pad entfernt.</p>
+    <div class="slots" id="tpslots"></div>
+  </details>
+</section>
 <section class="card" id="ctrl" hidden>
   <h2>Controller-Knobs</h2>
   <div class="banks" id="banks"></div>
@@ -229,6 +263,7 @@ function buildCtrl() {
     kb.appendChild(d);
   });
   refreshKnobVals();
+  buildTransport();
   const slots = (el, kind, list) => { el.innerHTML = `<span>${kind === 'knob' ? 'Knobs' : 'Pads'}:</span>`;
     list.forEach((s, i) => { const b = document.createElement('button');
       const armed = ctrl.learn && ctrl.learn[0] === kind && ctrl.learn[1] === i;
@@ -248,10 +283,10 @@ function buildCtrl() {
     b.oncontextmenu = e => { e.preventDefault(); post('/api/ctrl/clear', {slot: 'next', index: 0}); };
     el.appendChild(b); }
   const l = ctrl.learn;
-  $('#learnhint').textContent = l ? (l[0] === 'knob' ? `Jetzt Knob ${l[1] + 1} drehen ...` : l[0] === 'next' ? 'Jetzt die Weiter-Taste drücken ...' : `Jetzt Pad ${l[1] + 1} drücken ...`) : '';
+  $('#learnhint').textContent = l && l[0] === 'transport' ? '' : l ? (l[0] === 'knob' ? `Jetzt Knob ${l[1] + 1} drehen ...` : l[0] === 'next' ? 'Jetzt die Weiter-Taste drücken ...' : `Jetzt Pad ${l[1] + 1} drücken ...`) : '';
   $('#wizard').textContent = l ? 'Abbrechen' : 'Einrichten';
   $('#wizard').onclick = () => post('/api/ctrl/learn', l ? {slot: null} : {slot: 'knob', index: 0, wizard: true});
-  if (l) $('#setup').open = true;
+  if (l && l[0] !== 'transport') $('#setup').open = true;
   paramOptions($('#modwheel'), ctrl.modwheel.param);
   $('#modwheel').onchange = e => post('/api/ctrl/modwheel', {id: e.target.value || null});
   $('#takeover').value = ctrl.takeover || 'jump';
@@ -264,6 +299,55 @@ function buildCtrl() {
     if (k >= 0) { const b = document.createElement('span'); b.className = 'badge'; b.textContent = 'K' + (k + 1); lab.appendChild(b); }
   }
 }
+// --- Looper ---
+let loop = null, loopT0 = 0;
+const LOOP_TXT = {empty: 'Leer. Record drücken, die Aufnahme startet mit der ersten Note.',
+  armed: 'Bereit: Aufnahme startet mit der ersten Note ...',
+  recording: 'Aufnahme läuft. Stop = fertig, Play/Rec = fertig und sofort abspielen.',
+  stopped: 'Schleife bereit. Play spielt sie ab, Record nimmt neu auf.',
+  playing: 'Schleife läuft. Regler wirken live mit. Rec = dazuspielen (Overdub), Stop = aus.',
+  overdub: 'Overdub: was du spielst, kommt zur Schleife dazu. Rec oder Play = fertig.'};
+function setLooper(d) {
+  loop = d; loopT0 = performance.now() / 1000 - d.pos;
+  const s = d.state;
+  $('#lrec').className = s === 'armed' ? 'armed' : (s === 'recording' || s === 'overdub') ? 'on' : '';
+  $('#lplay').className = (s === 'playing' || s === 'overdub') ? 'on' : '';
+  const pill = $('#looppill');
+  pill.hidden = s === 'empty' || s === 'stopped';
+  pill.className = {armed: 'armed', recording: 'rec', playing: 'play', overdub: 'dub'}[s] || '';
+  drawLooper();
+}
+function drawLooper() {
+  if (!loop) return;
+  const s = loop.state, el = performance.now() / 1000 - loopT0;
+  let frac = 0, t = '';
+  if (s === 'recording') { frac = Math.min(el / loop.max, 1); t = `● REC ${el.toFixed(1)} s`; }
+  else if (s === 'playing' || s === 'overdub') { frac = loop.length ? (el % loop.length) / loop.length : 0;
+    t = (s === 'overdub' ? '● DUB ' : '▶ ') + `${(el % loop.length).toFixed(1)} / ${loop.length.toFixed(1)} s`; }
+  else if (s === 'armed') t = '● REC bereit';
+  $('#lbar div').style.width = (frac * 100) + '%';
+  $('#lbar div').style.background = s === 'recording' || s === 'overdub' ? 'var(--learn)' : s === 'playing' ? '#46a758' : 'var(--acc)';
+  $('#looppill').textContent = t;
+  $('#ltext').textContent = LOOP_TXT[s] + (loop.length ? `  ·  Schleife ${loop.length.toFixed(1)} s, ${loop.notes} Noten` : '')
+    + (s === 'recording' || s === 'armed' ? `  ·  max. ${loop.max} s` : '');
+}
+setInterval(() => { if (loop && loop.state !== 'empty' && loop.state !== 'stopped') drawLooper(); }, 100);
+for (const [id, cmd] of [['#lrec', 'record'], ['#lstop', 'stop'], ['#lplay', 'play'], ['#lclear', 'clear']])
+  $(id).onclick = () => post('/api/looper', {cmd});
+function buildTransport() {
+  const el = $('#tpslots'); if (!ctrl || !ctrl.transport) return;
+  el.innerHTML = '';
+  ['Record', 'Stop', 'Play'].forEach((name, i) => {
+    const s = ctrl.transport[i], armed = ctrl.learn && ctrl.learn[0] === 'transport' && ctrl.learn[1] === i;
+    const b = document.createElement('button');
+    b.className = 'slot' + (armed ? ' armed' : '') + (s ? '' : ' unset');
+    b.textContent = armed ? `${name}: Taste drücken ...` : `${name}: ${specLabel(s)}`;
+    b.onclick = () => post('/api/ctrl/learn', armed ? {slot: null} : {slot: 'transport', index: i});
+    b.oncontextmenu = e => { e.preventDefault(); post('/api/ctrl/clear', {slot: 'transport', index: i}); };
+    el.appendChild(b);
+  });
+}
+
 function refreshKnobVals() {
   for (const el of document.querySelectorAll('#knobs .kv')) {
     const pid = el.dataset.pid; el.textContent = pid && schema[pid] ? fmt(schema[pid], values[pid]) : '';
@@ -313,6 +397,7 @@ function setStatus(s) {
 async function init() {
   const st = await (await fetch('/api/state')).json();
   values = st.values; if (st.midi) midi = st.midi; ctrl = st.controller; window.groupLabels = st.groups;
+  if (st.looper) setLooper(st.looper);
   build(st); setPresets(st.presets, st.preset); setStatus(st.status); refreshMidi();
   const es = new EventSource('/api/events');
   es.addEventListener('param', e => { const d = JSON.parse(e.data);
@@ -326,6 +411,7 @@ async function init() {
   es.addEventListener('midiraw', e => { (midi.log = midi.log || []).push(JSON.parse(e.data));
     if (midi.log.length > 40) midi.log.shift();
     const el = $('#midilog'); el.textContent = midi.log.join('\n'); el.scrollTop = el.scrollHeight; });
+  es.addEventListener('looper', e => setLooper(JSON.parse(e.data)));
   es.addEventListener('status', e => setStatus(JSON.parse(e.data)));
   let lost = false;
   es.onerror = () => { lost = true; $('#status').textContent = 'Verbindung weg - versuche neu ...'; };
