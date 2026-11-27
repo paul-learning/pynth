@@ -48,7 +48,9 @@ state() {
 
 has_clients() {
     command -v iw >/dev/null || return 0          # ohne iw: lieber im Hotspot bleiben
-    iw dev "$IFACE" station dump 2>/dev/null | grep -q '^Station'
+    # nur Geraete, die wirklich verbunden sind (Passwort ok). Ein Tablet, das es mit falschem
+    # Passwort/PMF-Problem immer wieder versucht, haelt den Hotspot sonst ewig am Leben.
+    iw dev "$IFACE" station dump 2>/dev/null | grep -qE '^[[:space:]]*authorized:[[:space:]]*yes'
 }
 
 # WPA2/AES, kein PMF und kein Stromsparen: mit PMF scheitern viele Tablets/Handys am
