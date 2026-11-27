@@ -101,8 +101,10 @@ class Wifi:
                     nets[f[2]] = {"ssid": f[2], "signal": sig, "secure": f[1] not in ("", "--")}
         for n in nets.values():
             n["known"] = n["ssid"] in known
-        return {"ok": True, "mode": mode, "cached": mode == "hotspot",
-                "networks": sorted(nets.values(), key=lambda n: -n["signal"])}
+        seen = sorted(nets.values(), key=lambda n: -n["signal"])
+        unseen = [{"ssid": k, "signal": None, "secure": True, "known": True}
+                  for k in sorted(known) if k and k not in nets]     # gespeichert, gerade nicht gesehen
+        return {"ok": True, "mode": mode, "cached": mode == "hotspot", "networks": seen + unseen}
 
     def _background(self, label, cmd, stdin=None):
         with self._lock:
@@ -132,3 +134,9 @@ class Wifi:
 
     def hotspot(self) -> bool:
         return self._background("Starte Hotspot ...", "hotspot")
+
+    def known(self) -> bool:
+        return self._background("Suche bekanntes WLAN ...", "known")
+
+    def rescan(self) -> bool:
+        return self._background("Suche WLANs ...", "rescan")

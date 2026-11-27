@@ -151,7 +151,9 @@
 <details class="card" id="wifi">
   <summary><h2>WLAN</h2><span id="wifisum">...</span></summary>
   <p id="wifistate"></p>
-  <div class="slots"><button id="wifiscan">WLANs suchen</button>
+  <div class="slots"><button id="wifiknown" hidden title="Hotspot geht aus, der Pi verbindet sich mit einem gespeicherten WLAN in Reichweite">Ins bekannte WLAN wechseln</button>
+    <button id="wifiscan">WLANs suchen</button>
+    <button id="wifirescan" hidden title="Im Hotspot kann der Pi nicht suchen: dafür geht der Hotspot ca. 20 s aus">Neu suchen (Hotspot ~20 s weg)</button>
     <button id="wifihs" title="Pi spannt sein eigenes WLAN auf (bestehende Verbindung wird getrennt)">Hotspot starten</button></div>
   <div id="wifilist"></div>
   <div class="slots">
@@ -160,8 +162,9 @@
     <button id="wifigo">Verbinden</button></div>
   <p id="wifimsg"></p>
   <p class="legend">Ohne bekanntes WLAN macht der Pi nach etwa einer Minute den Hotspot „pynth“ auf, die UI ist dann unter
-     http://10.42.0.1:8080 erreichbar. Beim Verbinden wird der Hotspot getrennt: Handy wieder ins Heim-WLAN und
-     http://pynth.local:8080 öffnen. Klappt es nicht (z.B. falsches Passwort), kommt der Hotspot nach ca. 1–2 Minuten zurück.</p>
+     http://pynth.home (oder http://10.42.0.1) erreichbar. Gespeicherte WLANs sind markiert: antippen und ohne Passwort
+     „Verbinden“. Beim Wechsel ins WLAN wird der Hotspot getrennt: Tablet ins gleiche WLAN und http://pynth.local öffnen.
+     Klappt es nicht (z.B. falsches Passwort), kommt der Hotspot nach ca. 1–2 Minuten zurück.</p>
 </details>
 <main id="groups"></main>
 <div id="kbwrap">
@@ -490,30 +493,41 @@ function setWifi(w) {
   $('#wifistate').innerHTML = w.busy ? esc(w.busy)
     : !w.setup ? 'WLAN-Setup ist noch nicht installiert: <code>sudo bash /home/pynth/pynth/deploy/install-wifi.sh</code>'
     : '';
-  for (const b of ['#wifiscan', '#wifihs', '#wifigo']) $(b).disabled = !!w.busy || !w.setup;
+  for (const b of ['#wifiscan', '#wifihs', '#wifigo', '#wifiknown', '#wifirescan']) $(b).disabled = !!w.busy || !w.setup;
+  const hs = w.mode === 'hotspot';
+  $('#wifiknown').hidden = $('#wifirescan').hidden = !hs; $('#wifihs').hidden = hs;
+  $('#wifiscan').textContent = hs ? 'Liste zeigen' : 'WLANs suchen';
+  if (hs && $('#wifi').open && !wifiListed && !w.busy) showWifiList();   // im Hotspot gleich die Liste zeigen
   if (w.last && !w.busy) { const m = $('#wifimsg'); m.textContent = w.last.msg; m.className = w.last.ok ? 'ok' : 'err'; }
 }
+let wifiListed = false;
 const loadWifi = () => fetch('/api/wifi').then(r => r.json()).then(setWifi).catch(() => {});
-$('#wifi').addEventListener('toggle', () => { if ($('#wifi').open) loadWifi(); });
-$('#wifiscan').onclick = async () => {
+$('#wifi').addEventListener('toggle', () => {
+  try { sessionStorage.setItem('wifiOpen', $('#wifi').open ? '1' : ''); } catch (e) {}
+  if ($('#wifi').open) loadWifi(); });
+try { if (sessionStorage.getItem('wifiOpen')) $('#wifi').open = true; } catch (e) {}   // nach Neuladen offen lassen
+$('#wifiscan').onclick = () => showWifiList();
+async function showWifiList() {
+  wifiListed = true;
   const list = $('#wifilist'), m = $('#wifimsg');
   list.textContent = 'suche ...'; m.textContent = ''; m.className = '';
   const r = await post('/api/wifi/scan');
   list.innerHTML = '';
   if (!r.ok) { m.textContent = r.error; m.className = 'err'; return; }
-  if (r.cached) m.textContent = 'Im Hotspot kann der Pi nicht suchen, das ist die Liste von vor dem Hotspot. Fehlt dein Netz, Namen unten eintippen.';
+  if (r.cached) m.textContent = 'Im Hotspot kann der Pi nicht gleichzeitig suchen: das ist die Liste von vor dem Hotspot. '
+    + '„Neu suchen“ schaltet den Hotspot dafür ca. 20 s aus, danach Seite neu laden. Fehlt dein Netz, Namen unten eintippen.';
   if (!r.networks.length) list.textContent = 'keine WLANs gefunden';
   for (const n of r.networks) {
     const b = document.createElement('button');
     b.innerHTML = `<span>${esc(n.ssid)}${n.known ? ' <small>gespeichert</small>' : ''}</span>`
-      + `<small>${n.secure ? '🔒 ' : ''}${n.signal}%</small>`;
+      + `<small>${n.signal == null ? 'nicht in der Liste' : (n.secure ? '🔒 ' : '') + n.signal + '%'}</small>`;
     b.onclick = () => { for (const x of list.children) x.classList.remove('sel'); b.classList.add('sel');
       $('#wifissid').value = n.ssid; $('#wifipw').value = '';
       $('#wifipw').placeholder = n.known ? 'Passwort (leer = gespeichertes)' : n.secure ? 'Passwort' : 'offen, kein Passwort';
       $('#wifipw').focus(); };
     list.appendChild(b);
   }
-};
+}
 $('#wifigo').onclick = async () => {
   const ssid = $('#wifissid').value.trim(), password = $('#wifipw').value, m = $('#wifimsg');
   if (!ssid) { m.textContent = 'Bitte ein WLAN wählen oder den Namen eintippen'; m.className = 'err'; return; }
@@ -521,10 +535,22 @@ $('#wifigo').onclick = async () => {
   const r = await post('/api/wifi/connect', {ssid, password});
   m.className = r.ok ? '' : 'err';
   m.textContent = r.ok ? `Verbinde mit ${ssid} ... Falls du über den Hotspot hier bist, reißt die Verbindung jetzt ab: `
-    + `Handy ins WLAN „${ssid}“ und http://pynth.local:8080 öffnen.` : r.error;
+    + `Tablet ins WLAN „${ssid}“ und http://pynth.local öffnen.` : r.error;
   $('#wifipw').value = '';
 };
 $('#wifihs').onclick = () => { if (confirm('Hotspot starten? Die aktuelle WLAN-Verbindung des Pi wird getrennt.')) post('/api/wifi/hotspot'); };
+$('#wifiknown').onclick = async () => {
+  if (!confirm('Hotspot ausschalten und ein bekanntes WLAN suchen? Findet der Pi keins, ist der Hotspot nach ca. 1 Minute wieder da.')) return;
+  await post('/api/wifi/known');
+  const m = $('#wifimsg'); m.className = '';
+  m.textContent = 'Hotspot geht aus. Findet der Pi ein bekanntes WLAN, Tablet ins gleiche WLAN und http://pynth.local öffnen. '
+    + 'Sonst ist der Hotspot in ca. 1 Minute wieder da.';
+};
+$('#wifirescan').onclick = async () => {
+  await post('/api/wifi/rescan');
+  const m = $('#wifimsg'); m.className = '';
+  m.textContent = 'Hotspot ist ca. 20 s aus. Danach verbindet sich das Tablet meist von selbst wieder, dann Seite neu laden.';
+};
 loadWifi();
 </script>
 </body>

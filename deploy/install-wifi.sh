@@ -10,7 +10,9 @@ if [ "${1:-}" = --uninstall ]; then
     systemctl disable --now pynth-wifi.service 2>/dev/null || true
     nmcli con down pynth-hotspot 2>/dev/null || true
     nmcli con delete pynth-hotspot 2>/dev/null || true
-    rm -f /etc/systemd/system/pynth-wifi.service /etc/sudoers.d/pynth-wifi /usr/local/sbin/pynth-wifi
+    nft delete table ip pynth 2>/dev/null || true
+    rm -f /etc/systemd/system/pynth-wifi.service /etc/sudoers.d/pynth-wifi /usr/local/sbin/pynth-wifi \
+          /etc/NetworkManager/dnsmasq-shared.d/pynth.conf
     systemctl daemon-reload
     echo "Entfernt. /etc/default/pynth-wifi bleibt liegen (kann geloescht werden)."
     exit 0
@@ -19,7 +21,7 @@ fi
 nmcli -t general status >/dev/null 2>&1 || { echo "NetworkManager laeuft nicht, Abbruch."; exit 1; }
 
 echo "== Pakete (avahi fuer pynth.local, iw + dnsmasq-base fuer den Hotspot)"
-apt-get install -y avahi-daemon iw dnsmasq-base >/dev/null
+apt-get install -y avahi-daemon iw dnsmasq-base nftables >/dev/null
 systemctl enable --now avahi-daemon >/dev/null 2>&1 || true
 
 echo "== Skript, Einstellungen, sudo-Regel"
@@ -31,6 +33,10 @@ if visudo -cqf /etc/sudoers.d/pynth-wifi.new; then
 else
     rm -f /etc/sudoers.d/pynth-wifi.new; echo "sudo-Regel fehlerhaft, Abbruch."; exit 1
 fi
+
+echo "== Name im Hotspot: http://pynth.home"
+mkdir -p /etc/NetworkManager/dnsmasq-shared.d
+printf 'address=/pynth.home/10.42.0.1\n' > /etc/NetworkManager/dnsmasq-shared.d/pynth.conf
 
 echo "== Hostname"
 if [ "$(hostname)" != pynth ]; then
@@ -54,6 +60,6 @@ fi
 
 . /etc/default/pynth-wifi
 echo
-echo "Fertig. Web-UI: http://pynth.local:8080"
+echo "Fertig. Web-UI: http://pynth.local (oder :8080)"
 echo "Ohne bekanntes WLAN startet nach ${GRACE:-60}s der Hotspot \"${HOTSPOT_SSID:-pynth}\""
-echo "(Passwort in /etc/default/pynth-wifi), dann: http://10.42.0.1:8080"
+echo "(Passwort in /etc/default/pynth-wifi), dann: http://pynth.home oder http://10.42.0.1"

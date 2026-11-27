@@ -7,6 +7,9 @@
 #   pynth-wifi scan      WLANs auflisten (fuer die Web-UI, im Hotspot: letzter Scan)
 #   pynth-wifi connect   SSID und Passwort zeilenweise von stdin, verbindet wlan0
 #   pynth-wifi hotspot   Hotspot jetzt starten
+#   pynth-wifi known     Hotspot aus, bekanntes WLAN in Reichweite suchen und verbinden
+#                        (sonst Hotspot wieder an)
+#   pynth-wifi rescan    WLAN-Liste neu (im Hotspot: Hotspot dafuer ca. 20 s aus)
 #
 # Die Web-UI (Benutzer pynth) darf per sudo genau scan/connect/hotspot aufrufen
 # (deploy/pynth-wifi.sudoers). Installiert wird das Skript nach /usr/local/sbin, damit
@@ -125,8 +128,23 @@ start_hotspot() {
     nmcli -w 30 con up "$HOTSPOT" >/dev/null
 }
 
+# Port 80 -> 8080, damit http://pynth.home bzw. http://pynth.local ohne :8080 geht
+setup_port80() {
+    command -v nft >/dev/null || return 0
+    nft delete table ip pynth 2>/dev/null
+    nft -f - <<'NFT' || log "Port-80-Weiterleitung fehlgeschlagen"
+table ip pynth {
+    chain prerouting {
+        type nat hook prerouting priority dstnat; policy accept;
+        fib daddr type local tcp dport 80 redirect to :8080
+    }
+}
+NFT
+}
+
 cmd_watch() {
     ensure_hotspot_profile || log "Hotspot-Profil konnte nicht angelegt werden"
+    setup_port80
     local lost=0 idle=0 st
     while sleep "$TICK"; do
         exec 9>"$RUN/lock"
@@ -222,10 +240,42 @@ cmd_hotspot() {
     start_hotspot && echo "Hotspot laeuft"
 }
 
+cmd_known() {
+    exec 9>"$RUN/lock"
+    flock -w 60 9 || { echo "WLAN ist gerade beschaeftigt"; return 1; }
+    if [ "$(state)" = hotspot ]; then
+        nmcli con down "$HOTSPOT" >/dev/null 2>&1
+        sleep 2
+    fi
+    if try_known; then
+        echo "Verbunden mit $(nmcli -g GENERAL.CONNECTION dev show "$IFACE" | unesc)"
+        return 0
+    fi
+    start_hotspot
+    echo "Kein bekanntes WLAN in Reichweite, Hotspot laeuft wieder"
+    return 1
+}
+
+cmd_rescan() {
+    exec 9>"$RUN/lock"
+    flock -w 60 9 || { echo "WLAN ist gerade beschaeftigt"; return 1; }
+    if [ "$(state)" = hotspot ]; then
+        nmcli con down "$HOTSPOT" >/dev/null 2>&1
+        sleep 2
+        fresh_scan
+        nmcli -w 30 con up "$HOTSPOT" >/dev/null
+    else
+        fresh_scan
+    fi
+    echo "WLAN-Liste aktualisiert"
+}
+
 case "${1:-}" in
     watch) cmd_watch ;;
     scan) cmd_scan ;;
     connect) cmd_connect ;;
     hotspot) cmd_hotspot ;;
-    *) echo "Aufruf: $0 watch|scan|connect|hotspot" >&2; exit 2 ;;
+    known) cmd_known ;;
+    rescan) cmd_rescan ;;
+    *) echo "Aufruf: $0 watch|scan|connect|hotspot|known|rescan" >&2; exit 2 ;;
 esac
