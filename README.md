@@ -92,15 +92,17 @@ Die Web-UI zeigt CPU-Last und Underruns live an.
 
 ### Knob-Bänke (z.B. Samson Graphite M25: 8 Knobs, 4 Pads)
 
-Die 4 Pads schalten die Bank um, jede Bank belegt die 8 Knobs neu, also 32 Regler:
+Die 4 Pads schalten die Bank um, jede Bank belegt die 8 Knobs neu, also bis zu 32 Regler.
+Alle Bänke starten leer und werden selbst belegt (eine alte Vorbelegung in `controller.json`
+wird beim Start automatisch geleert, eigene Änderungen bleiben):
 
-| Pad | Bank | Knobs 1–8 |
-|---|---|---|
-| 1 | Osz + Mix | Osc1 Welle, Osc1 Oktave, Osc2 Welle, Osc2 Oktave, Verstimmung, Osc1, Osc2, Noise |
-| 2 | Filter + Hüllkurve | Cutoff, Resonanz, –, –, Attack, Decay, Sustain, Release |
-| 3 | LFO + Noise | Rate, Tiefe, Welle, Ziel, Noise-Farbe, Noise-Pegel, –, – |
-| 4 | Effekte + Master | Delay Mix, Delay Zeit, Delay Feedback, –, Hall Mix, Hall Größe, –, Master |
-
+* **Bank belegen**: Pad drücken (oder in der Web-UI die Bank wählen), dann **L** am Regler
+  klicken und einen der 8 Knobs drehen. Der Regler landet auf diesem Knob in der aktiven Bank.
+  Dreht man stattdessen einen Regler, der kein Bank-Knob ist (z.B. den großen Drehregler),
+  gilt die Zuordnung in allen Bänken (z.B. Master-Lautstärke). Rechtsklick auf L entfernt.
+  Alternativ im Kasten "Controller-Knobs" pro Knob einen Regler auswählen.
+* **MIDI-Monitor**: unter "Controller einrichten" stehen die letzten 40 eingehenden Nachrichten
+  (mit Kanal 1–16). Damit sieht man, was Pads und Tasten wirklich senden.
 * **Einrichten**: Web-UI → "Controller einrichten" → **Einrichten**, dann Knob 1 bis 8 jeweils
   ein Stück drehen und Pad 1 bis 4 drücken. Funktioniert egal ob der Controller CCs, Noten
   oder Program Changes sendet. Solange die Pads nicht eingerichtet sind, spielen sie einfach Töne.

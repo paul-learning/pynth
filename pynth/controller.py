@@ -34,21 +34,18 @@ DEFAULT_CONFIG = {
     # "jump": Knob setzt sofort seinen Wert (voller Weg, kann nach Bankwechsel springen)
     # "pickup": Soft-Takeover, Knob greift erst, wenn er den aktuellen Wert ueberstreicht
     "takeover": "jump",
-    "banks": [
-        {"name": "Osz + Mix",
-         "params": ["osc1.wave", "osc1.octave", "osc2.wave", "osc2.octave",
-                    "osc2.detune", "mix.osc1", "mix.osc2", "mix.noise"]},
-        {"name": "Filter + Hüllkurve",
-         "params": ["filter.cutoff", "filter.resonance", None, None,
-                    "env.attack", "env.decay", "env.sustain", "env.release"]},
-        {"name": "LFO + Noise",
-         "params": ["lfo.rate", "lfo.depth", "lfo.wave", "lfo.target",
-                    "noise.type", "mix.noise", None, None]},
-        {"name": "Effekte + Master",
-         "params": ["fx.delay_mix", "fx.delay_time", "fx.delay_feedback", None,
-                    "fx.reverb_mix", "fx.reverb_size", None, "master.volume"]},
-    ],
+    # Jede Bank startet leer und wird selbst belegt: Pad waehlen, "L" am Regler, Knob drehen.
+    "banks": [{"name": "", "params": [None] * N_KNOBS} for _ in range(N_PADS)],
 }
+
+# Fruehere Vorbelegung (bis PR 2). Steht sie unveraendert in controller.json, wird sie geleert.
+OLD_DEFAULT_BANKS = [
+    ["osc1.wave", "osc1.octave", "osc2.wave", "osc2.octave", "osc2.detune", "mix.osc1", "mix.osc2", "mix.noise"],
+    ["filter.cutoff", "filter.resonance", None, None, "env.attack", "env.decay", "env.sustain", "env.release"],
+    ["lfo.rate", "lfo.depth", "lfo.wave", "lfo.target", "noise.type", "mix.noise", None, None],
+    ["fx.delay_mix", "fx.delay_time", "fx.delay_feedback", None, "fx.reverb_mix", "fx.reverb_size", None, "master.volume"],
+]
+OLD_DEFAULT_NAMES = ["Osz + Mix", "Filter + Hüllkurve", "LFO + Noise", "Effekte + Master"]
 
 
 def _matches(spec: str | None, kind: str, channel: int, number: int) -> bool:
@@ -73,6 +70,7 @@ class Controller:
         self._last_x: list[float | None] = [None] * N_KNOBS   # letzte Knob-Stellung 0..1
         self._last_set: list[object] = [None] * N_KNOBS       # Wert, den der Knob zuletzt gesetzt hat
         self._learn_seen: dict[str, int] = {}                # Learn: erster gesehener CC-Wert je Eingang
+        self._wizard_done: set[str] = set()                  # in diesem Einrichten-Durchlauf schon gelernt
         self.on_learned = None                               # Callback(spec): z.B. alte Direkt-Belegung loeschen
         self._load()
 
@@ -94,14 +92,23 @@ class Controller:
         if isinstance(data.get("modwheel"), dict):
             cfg["modwheel"].update(data["modwheel"])
         banks = data.get("banks")
+        migrated = False
         if isinstance(banks, list):
             for i, b in enumerate(banks[:N_PADS]):
                 if not isinstance(b, dict):
                     continue
                 ps = list(b.get("params") or [])[:N_KNOBS]
                 ps = [p if p in self.params.params else None for p in ps]
-                cfg["banks"][i] = {"name": str(b.get("name") or cfg["banks"][i]["name"]),
-                                   "params": ps + [None] * (N_KNOBS - len(ps))}
+                ps += [None] * (N_KNOBS - len(ps))
+                name = str(b.get("name") or "")
+                if ps == OLD_DEFAULT_BANKS[i]:          # alte Vorbelegung -> leere Bank
+                    ps, migrated = [None] * N_KNOBS, True
+                if name == OLD_DEFAULT_NAMES[i]:
+                    name, migrated = "", True
+                cfg["banks"][i] = {"name": name, "params": ps}
+        if migrated:
+            log.info("Alte Bank-Vorbelegung entfernt, Baenke sind jetzt leer")
+            self._save()
 
     def _save(self):
         try:
@@ -123,7 +130,7 @@ class Controller:
 
     # ----------------------------- Aktionen (Web) -----------------------------
     def set_bank(self, i: int):
-        if 0 <= i < N_PADS:
+        if 0 <= i < N_PADS and i != self.bank:
             self.bank = i
             self._picked = [False] * N_KNOBS
             self._announce()
@@ -135,6 +142,7 @@ class Controller:
         else:
             self.learn_slot, self.wizard = None, False
         self._learn_seen = {}
+        self._wizard_done = set()
         self._announce()
 
     def set_takeover(self, mode: str):
@@ -174,6 +182,22 @@ class Controller:
             self._save()
             self._announce()
 
+    def knob_index(self, spec: str) -> int | None:
+        try:
+            return self.config["knobs"].index(spec)
+        except ValueError:
+            return None
+
+    def unassign_param(self, pid: str):
+        """Regler aus der aktiven Bank nehmen (Rechtsklick auf "L")."""
+        ps = self.config["banks"][self.bank]["params"]
+        if pid in ps:
+            for k, x in enumerate(ps):
+                if x == pid:
+                    ps[k] = None
+            self._save()
+            self._announce()
+
     def set_modwheel(self, pid: str | None):
         if pid is None or pid in self.params.params:
             self.config["modwheel"]["param"] = pid
@@ -183,6 +207,9 @@ class Controller:
     # ----------------------------- MIDI -----------------------------
     def _learn_input(self, spec: str):
         slot, i = self.learn_slot
+        if self.wizard and spec in self._wizard_done:
+            return      # z.B. Pad loest doppelt aus oder Knob 1 wird weitergedreht: nicht ins naechste Feld
+        self._wizard_done.add(spec)
         for key in ("knobs", "pads"):        # gleicher Eingang darf nur einmal belegt sein
             lst = self.config[key]
             for j, s in enumerate(lst):
@@ -230,7 +257,8 @@ class Controller:
             return True
         for i, s in enumerate(self.config["pads"]):
             if _matches(s, "note", channel, note):
-                self.set_bank(i)
+                if i != self.bank:
+                    self.set_bank(i)
                 return True
         return False
 
