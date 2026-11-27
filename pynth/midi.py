@@ -12,6 +12,7 @@ import json
 import logging
 import threading
 import time
+from collections import deque
 from pathlib import Path
 
 from .params import RENAMED
@@ -19,6 +20,8 @@ from .params import RENAMED
 log = logging.getLogger("pynth.midi")
 
 IGNORE_PORTS = ("Midi Through", "RtMidi")
+SKIP_TYPES = ("clock", "active_sensing")
+CONTINUOUS = ("control_change", "pitchwheel", "aftertouch", "polytouch")   # im Monitor gedrosselt
 
 
 class MidiManager:
@@ -32,6 +35,8 @@ class MidiManager:
         self.ports: dict[str, object] = {}
         self.last_message = ""
         self._last_shown = 0.0
+        self.log: deque[str] = deque(maxlen=40)      # MIDI-Monitor (rohe Nachrichten)
+        self._last_raw: dict[str, float] = {}
         self._stop = threading.Event()
         self._load_map()
         if controller is not None:
@@ -68,11 +73,29 @@ class MidiManager:
     def unmap(self, pid: str):
         self.mapping = {k: v for k, v in self.mapping.items() if v != pid}
         self._save_map()
+        if self.controller:
+            self.controller.unassign_param(pid)
         self._announce()
 
     def info(self) -> dict:
         return {"ports": list(self.ports), "map": self.mapping,
-                "learn": self.learn_target, "last": self.last_message}
+                "learn": self.learn_target, "last": self.last_message, "log": list(self.log)}
+
+    def _raw(self, msg, port: str):
+        """Jede Nachricht roh in den MIDI-Monitor (Web-UI), Dauer-Nachrichten gedrosselt."""
+        now = time.monotonic()
+        if msg.type in CONTINUOUS:
+            if now - self._last_raw.get(msg.type, 0.0) < 0.05:
+                return
+            self._last_raw[msg.type] = now
+        d = msg.dict()
+        d.pop("time", None)
+        typ, ch = d.pop("type"), d.pop("channel", None)
+        rest = " ".join(f"{k}={v}" for k, v in d.items())
+        line = (f"{time.strftime('%H:%M:%S')}  {port[:20]}  "
+                + (f"Kanal {ch + 1:2d}  " if ch is not None else "") + f"{typ} {rest}")
+        self.log.append(line)
+        self.params.broadcast("midiraw", line)
 
     def _announce(self):
         self.params.broadcast("midi", self.info())
@@ -86,10 +109,15 @@ class MidiManager:
             self.params.broadcast("midilast", text)
 
     # ----------------------------- Eingang -----------------------------
-    def _on_message(self, msg):
+    def _on_message(self, msg, port: str = ""):
         try:
             t = msg.type
+            if t in SKIP_TYPES:
+                return
+            self._raw(msg, port)
             ctl = self.controller
+            if t in ("polytouch", "aftertouch"):   # Pad-Druck-Nachdruck: nur im Monitor zeigen
+                return
             if t in ("note_on", "note_off"):
                 ch = msg.channel + 1
                 on = t == "note_on" and msg.velocity > 0
@@ -116,14 +144,24 @@ class MidiManager:
                 if not self.learn_target and ctl and ctl.handle_cc(msg.channel + 1, msg.control, msg.value):
                     return
                 if self.learn_target:
-                    self.mapping = {k: v for k, v in self.mapping.items() if v != self.learn_target}
-                    self.mapping[key] = self.learn_target
-                    if ctl:
-                        ctl.forget_input(f"cc:{key}")      # Knopf ist jetzt direkt belegt
-                    log.info("MIDI-Learn: %s -> %s", key, self.learn_target)
+                    pid = self.learn_target
+                    knob = ctl.knob_index(f"cc:{key}") if ctl else None
+                    self.mapping = {k: v for k, v in self.mapping.items() if v != pid}
+                    if knob is not None:
+                        # Bank-Knob gedreht -> Regler in die aktive Bank legen (nicht global)
+                        self.mapping.pop(key, None)
+                        ctl.assign(ctl.bank, knob, pid)
+                        log.info("MIDI-Learn: Bank %d Knob %d -> %s", ctl.bank + 1, knob + 1, pid)
+                    else:
+                        self.mapping[key] = pid
+                        if ctl:
+                            ctl.forget_input(f"cc:{key}")      # Knopf ist jetzt direkt belegt
+                        log.info("MIDI-Learn: %s -> %s", key, pid)
                     self.learn_target = None
                     self._save_map()
                     self._announce()
+                    if knob is not None:
+                        return
                 if key in self.mapping:
                     self.params.set_norm(self.mapping[key], msg.value / 127.0, source="midi")
                 elif msg.control == 64:
@@ -151,7 +189,8 @@ class MidiManager:
                 changed = True
         for name in wanted - set(self.ports):
             try:
-                self.ports[name] = mido.open_input(name, callback=self._on_message)
+                self.ports[name] = mido.open_input(
+                    name, callback=lambda m, n=name: self._on_message(m, n))
                 log.info("MIDI verbunden: %s", name)
                 changed = True
             except Exception as e:
