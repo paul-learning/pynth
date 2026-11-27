@@ -105,7 +105,7 @@ PARAMS: list[Param] = [
     Param("fx.reverb_size", "Hall Größe", "fx", 0, 1, 0.6),
 
     # Tempo der Looper-Wiedergabe (Noten kommen schneller/langsamer, Tonhoehe bleibt)
-    Param("looper.speed", "Tempo", "looper", 0.5, 2.0, 1.0, curve="exp", unit="×", preset=False),
+    Param("looper.speed", "Tempo", "looper", 0.25, 5.0, 1.0, curve="exp", unit="×", preset=False),
 ]
 
 # Umbenannte Parameter (alte ID -> neue ID). Gilt fuer Presets, state.json und midi_map.json.
