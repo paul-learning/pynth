@@ -298,7 +298,7 @@ class Engine:
         t0 = time.perf_counter()
         p = dict(self.params.values)        # Schnappschuss: Werte aendern sich nicht mitten im Block
         self._handle_events(p)
-        for kind, note, vel in self.looper.tick(n):     # Schleife: Noten wie live gespielt
+        for kind, note, vel in self.looper.tick(n, p.get("looper.speed", 1.0)):     # Schleife: Noten wie live gespielt
             self._apply(kind, note, vel, p, src=1)
         sr = self.sr
         ramp = self._ramp(n)

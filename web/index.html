@@ -414,7 +414,15 @@ function buildCtrl() {
   }
 }
 // --- Looper ---
-let loop = null, loopT0 = 0;
+let loop = null, loopA = {t: 0, pos: 0, speed: 1};   // Anker: Position + Tempo zu einem Zeitpunkt
+const loopSpeed = () => +(values['looper.speed'] || 1);
+function loopPos() {     // Position im Browser rechnen (kein Netzverkehr), Tempo-Wechsel setzt neuen Anker
+  const now = performance.now() / 1000, sp = loopSpeed();
+  if (loop.state !== 'recording' && sp !== loopA.speed) {
+    loopA = {t: now, pos: loopA.pos + (now - loopA.t) * loopA.speed, speed: sp};
+  }
+  return loopA.pos + (now - loopA.t) * (loop.state === 'recording' ? 1 : loopA.speed);
+}
 const LOOP_TXT = {empty: 'Leer. Record drücken, die Aufnahme startet mit der ersten Note.',
   armed: 'Bereit: Aufnahme startet mit der ersten Note ...',
   recording: 'Aufnahme läuft. Stop = fertig, Play/Rec = fertig und sofort abspielen.',
@@ -422,7 +430,7 @@ const LOOP_TXT = {empty: 'Leer. Record drücken, die Aufnahme startet mit der er
   playing: 'Schleife läuft. Regler wirken live mit. Rec = dazuspielen (Overdub), Stop = aus.',
   overdub: 'Overdub: was du spielst, kommt zur Schleife dazu. Rec oder Play = fertig.'};
 function setLooper(d) {
-  loop = d; loopT0 = performance.now() / 1000 - d.pos;
+  loop = d; loopA = {t: performance.now() / 1000, pos: d.pos, speed: loopSpeed()};
   const s = d.state;
   $('#lrec').className = s === 'armed' ? 'armed' : (s === 'recording' || s === 'overdub') ? 'on' : '';
   $('#lplay').className = (s === 'playing' || s === 'overdub') ? 'on' : '';
@@ -435,11 +443,12 @@ function setLooper(d) {
 }
 function drawLooper() {
   if (!loop) return;
-  const s = loop.state, el = performance.now() / 1000 - loopT0;
+  const s = loop.state, el = loopPos(), sp = loopSpeed();
+  const spTxt = Math.abs(sp - 1) > 0.005 ? `  ·  ${sp.toFixed(2)}×` : '';
   let frac = 0, t = '';
   if (s === 'recording') { frac = Math.min(el / loop.max, 1); t = `● REC ${el.toFixed(1)} s`; }
   else if (s === 'playing' || s === 'overdub') { frac = loop.length ? (el % loop.length) / loop.length : 0;
-    t = (s === 'overdub' ? '● DUB ' : '▶ ') + `${(el % loop.length).toFixed(1)} / ${loop.length.toFixed(1)} s`; }
+    t = (s === 'overdub' ? '● DUB ' : '▶ ') + `${(el % loop.length).toFixed(1)} / ${loop.length.toFixed(1)} s` + spTxt; }
   else if (s === 'armed') t = '● REC bereit';
   $('#lbar div').style.width = (frac * 100) + '%';
   $('#lbar div').style.background = s === 'recording' || s === 'overdub' ? 'var(--learn)' : s === 'playing' ? '#46a758' : 'var(--acc)';

@@ -235,6 +235,9 @@ die Schleife (Filter, Hüllkurve, LFO, Effekte …). Kostet praktisch keine CPU.
 * **Tasten am Controller**: Web-UI → Looper → "Tasten am Controller anlernen": Feld anklicken,
   Taste drücken. Eine Taste, die vorher als Pad die Bank umgeschaltet hat, wird dabei als Pad
   entfernt. Tasten, die MIDI Machine Control (MMC-Sysex) senden, funktionieren ohne Anlernen.
+* **Tempo** (Regler "Looper → Tempo", 0,5× bis 2×, Doppelklick = 1×): spielt die Schleife
+  schneller oder langsamer ab, die Tonhöhe bleibt gleich. Per "L" auf einen Knob legbar wie jeder
+  Regler. Gehört nicht zum Klang: Preset laden/speichern lässt das Tempo in Ruhe.
 * Panic stoppt auch die Wiedergabe. Die Schleife wird nicht gespeichert (weg nach Neustart).
 
 ## Dateien

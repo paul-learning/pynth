@@ -180,8 +180,10 @@ class Looper:
                 self._sustained.clear()
 
     # ------------------------------ Abspielen ------------------------------
-    def tick(self, n: int) -> list[tuple]:
-        """Einen Audio-Block weiter. Liefert die Schleifen-Ereignisse (kind, note, vel)."""
+    def tick(self, n: int, speed: float = 1.0) -> list[tuple]:
+        """Einen Audio-Block weiter. Liefert die Schleifen-Ereignisse (kind, note, vel).
+        speed: Wiedergabe-Tempo (1 = original). Die Position laeuft dann schneller/langsamer
+        durch die Schleife, die Tonhoehe bleibt gleich. Aufnahme laeuft immer in Echtzeit."""
         s = self.state
         if s == "recording":
             self.pos += n
@@ -193,7 +195,7 @@ class Looper:
             return []
         out = []
         ev, L = self.events, self.length
-        end = self.pos + n
+        end = self.pos + n * max(0.1, float(speed))
         while True:
             stop = min(end, L)
             while self._idx < len(ev) and ev[self._idx][0] < stop:

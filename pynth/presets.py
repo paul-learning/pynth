@@ -31,9 +31,12 @@ _ALIASES = {"envelope": "env", "effects": "fx"}
 _KEY_ALIASES = {"type": "wave", "volume": "level", "reverb": "reverb_mix", "delay": "delay_mix"}
 
 
-def nest(flat: dict, name: str) -> dict:
+def nest(flat: dict, name: str, preset: bool = False) -> dict:
+    """preset=True: nur Klang-Parameter (ohne z.B. Looper-Tempo)."""
     out: dict = {"name": name}
     for p in PARAMS:
+        if preset and not p.preset:
+            continue
         g, k = p.id.split(".", 1)
         v = flat.get(p.id, p.default)
         if isinstance(v, float) and v.is_integer() and p.step:
@@ -95,7 +98,7 @@ class PresetStore:
 
     def save(self, name: str, flat: dict) -> Path:
         f = self._find(name) or self.folder / f"{_slug(name)}.json"
-        save_json(f, nest(flat, name), backup=False)
+        save_json(f, nest(flat, name, preset=True), backup=False)
         return f
 
     def delete(self, name: str) -> bool:
