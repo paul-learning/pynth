@@ -133,6 +133,10 @@ wird beim Start automatisch geleert, eigene Änderungen bleiben):
   seine direkte "L"-Zuordnung weg und umgekehrt.
 * **Farben**: orange umrandet mit K1–K8 = Regler der aktiven Bank. Orange Zahl statt "L" =
   Regler direkt (ohne Bank) einem CC zugeordnet.
+* **Live-Ansicht** (Knopf „Live-Ansicht“ oben in der Web-UI): zeigt nur die 8 Knobs der aktiven
+  Bank, groß fürs Tablet, mit Regler-Name und aktuellem Wert. Wechselt mit, wenn man per Pad die
+  Bank umschaltet. Freie Knobs sind gestrichelt. „Detail-Ansicht“ führt zurück; der Browser merkt
+  sich die zuletzt gewählte Ansicht.
 * **Mod-Rad** (CC 1) steuert standardmäßig die LFO-Tiefe, umstellbar in der Web-UI.
 * Gespeichert in `controller.json` (Nutzerdaten, nicht im Repo).
 * Eingehende MIDI-Nachrichten anzeigen: `~/pynth_venv/bin/python -m pynth --midi-monitor`
