@@ -90,6 +90,27 @@ Die Web-UI zeigt CPU-Last und Underruns live an.
   Gespeichert in `midi_map.json` als `{"<kanal>:<cc>": "<param-id>"}`.
 * Fest: Noten, Pitchbend, CC 64 Sustain, CC 123 All Notes Off.
 
+### Knob-Bänke (z.B. Samson Graphite M25: 8 Knobs, 4 Pads)
+
+Die 4 Pads schalten die Bank um, jede Bank belegt die 8 Knobs neu, also 32 Regler:
+
+| Pad | Bank | Knobs 1–8 |
+|---|---|---|
+| 1 | Osz + Mix | Osc1 Welle, Osc1 Oktave, Osc2 Welle, Osc2 Oktave, Verstimmung, Osc1, Osc2, Noise |
+| 2 | Filter + Hüllkurve | Cutoff, Resonanz, –, –, Attack, Decay, Sustain, Release |
+| 3 | LFO + Noise | Rate, Tiefe, Welle, Ziel, Noise-Farbe, Noise-Pegel, –, – |
+| 4 | Effekte + Master | Delay Mix, Delay Zeit, Delay Feedback, –, Hall Mix, Hall Größe, –, Master |
+
+* **Einrichten**: Web-UI → "Controller einrichten" → **Einrichten**, dann Knob 1 bis 8 drehen
+  und Pad 1 bis 4 drücken. Funktioniert egal ob der Controller CCs oder Noten sendet.
+* **Belegung ändern**: im Kasten "Controller-Knobs" pro Knob einen Regler auswählen.
+* **Soft-Takeover**: Nach Bank- oder Preset-Wechsel greift ein Knob erst, wenn er den
+  aktuellen Wert überstreicht ("○ abholen" → "● greift"). Dadurch springt nichts.
+* **Mod-Rad** (CC 1) steuert standardmäßig die LFO-Tiefe, umstellbar in der Web-UI.
+* Gespeichert in `controller.json` (Nutzerdaten, nicht im Repo).
+* Eingehende MIDI-Nachrichten anzeigen: `~/pynth_venv/bin/python -m pynth --midi-monitor`
+  (oder `aseqdump -l` / `aseqdump -p <port>`). Die Web-UI zeigt die letzte Nachricht ebenfalls.
+
 ## Dateien
 
 ```
@@ -97,6 +118,7 @@ pynth/params.py   Parametermodell + Live-Event-Verteilung
 pynth/dsp.py      Oszillatoren, LFO, Biquad, Delay-/Comb-/Allpass-Linien, Hall
 pynth/engine.py   Voices, ADSR, Noise, Signalkette
 pynth/midi.py     MIDI-Eingang, Hotplug, CC-Mapping, Learn
+pynth/controller.py Knob-Bänke, Pads, Soft-Takeover, Mod-Rad
 pynth/web.py      HTTP-API + SSE
 pynth/presets.py  Preset-Format (JSON)
 web/index.html    Web-UI

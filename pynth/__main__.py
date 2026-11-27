@@ -5,6 +5,7 @@ Weitere Modi:
   python -m pynth --bench            CPU-Last pro Block messen (ohne Soundkarte)
   python -m pynth --render demo.wav  Kurze Demo als WAV rendern (ohne Soundkarte)
   python -m pynth --no-audio         Nur Web-UI + MIDI (zum UI-Testen am Laptop)
+  python -m pynth --midi-monitor     Eingehende MIDI-Nachrichten anzeigen (Strg+C beendet)
 """
 from __future__ import annotations
 
@@ -42,6 +43,7 @@ def parse_args():
     ap.add_argument("--no-midi", action="store_true")
     ap.add_argument("--list-devices", action="store_true")
     ap.add_argument("--bench", action="store_true")
+    ap.add_argument("--midi-monitor", action="store_true", help="eingehende MIDI-Nachrichten anzeigen")
     ap.add_argument("--render", type=Path, default=None)
     ap.add_argument("--preset", default=None, help="Preset beim Start laden")
     ap.add_argument("-v", "--verbose", action="store_true")
@@ -52,6 +54,22 @@ def import_sounddevice():
     os.environ.setdefault("SOUNDDEVICE_BACKEND", "alsa")   # wie im funktionierenden Setup
     import sounddevice as sd
     return sd
+
+
+def midi_monitor():
+    import mido
+    names = [n for n in mido.get_input_names() if not n.startswith(("Midi Through", "RtMidi"))]
+    if not names:
+        print("Kein MIDI-Eingang gefunden.")
+        return
+    ports = [mido.open_input(n) for n in names]
+    print("Lausche auf:", ", ".join(names), "- Strg+C beendet")
+    try:
+        for port, msg in mido.ports.multi_receive(ports, yield_ports=True):
+            if msg.type != "clock":
+                print(f"{port.name[:24]:24s}  Kanal {getattr(msg, 'channel', -1) + 1:2d}  {msg}")
+    except KeyboardInterrupt:
+        pass
 
 
 def bench(args):
@@ -116,6 +134,8 @@ def main():
         return
     if args.bench:
         return bench(args)
+    if args.midi_monitor:
+        return midi_monitor()
 
     data = args.data
     presets = PresetStore(data / "presets")
@@ -136,10 +156,12 @@ def main():
 
     engine = Engine(params, args.samplerate)
 
+    from .controller import Controller
+    controller = Controller(params, data / "controller.json")
     midi = None
     if not args.no_midi:
         from .midi import MidiManager
-        midi = MidiManager(engine, params, data / "midi_map.json")
+        midi = MidiManager(engine, params, data / "midi_map.json", controller)
         midi.start()
 
     audio_info = {"samplerate": args.samplerate, "blocksize": args.blocksize,
@@ -175,7 +197,7 @@ def main():
         threading.Thread(target=dummy_audio, name="dummy-audio", daemon=True).start()
 
     from .web import App, serve
-    httpd = serve(App(params, engine, presets, midi, ROOT / "web", audio_info), args.host, args.port)
+    httpd = serve(App(params, engine, presets, midi, ROOT / "web", audio_info, controller), args.host, args.port)
 
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())

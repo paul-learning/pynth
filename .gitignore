@@ -1,6 +1,7 @@
 # Nutzerdaten auf dem Pi (nicht ins Repo)
 state.json
 midi_map.json
+controller.json
 
 # Python
 __pycache__/

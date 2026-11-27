@@ -11,6 +11,11 @@ POST /api/preset/delete{"name": "Mein Sound"}
 POST /api/midi/learn   {"id": "filter.cutoff"}   (id null = abbrechen)
 POST /api/midi/unmap   {"id": "filter.cutoff"}
 POST /api/panic
+POST /api/ctrl/bank    {"bank": 0}                         aktive Knob-Bank (0-3)
+POST /api/ctrl/learn   {"slot": "knob", "index": 0, "wizard": true}   (slot null = abbrechen)
+POST /api/ctrl/clear   {"slot": "pad", "index": 2}
+POST /api/ctrl/assign  {"bank": 1, "knob": 7, "id": "lfo.rate"}   (id null = leer)
+POST /api/ctrl/modwheel{"id": "lfo.depth"}
 """
 from __future__ import annotations
 
@@ -27,8 +32,9 @@ log = logging.getLogger("pynth.web")
 
 
 class App:
-    def __init__(self, params, engine, presets, midi, web_dir: Path, audio_info: dict):
+    def __init__(self, params, engine, presets, midi, web_dir: Path, audio_info: dict, controller=None):
         self.params, self.engine, self.presets, self.midi = params, engine, presets, midi
+        self.controller = controller
         self.web_dir = Path(web_dir)
         self.audio_info = audio_info
 
@@ -40,6 +46,7 @@ class App:
             "preset": self.params.preset_name,
             "presets": self.presets.list(),
             "midi": self.midi.info() if self.midi else None,
+            "controller": self.controller.info() if self.controller else None,
             "status": self.status(),
         }
 
@@ -134,10 +141,30 @@ def make_handler(app: App):
                     p.broadcast("presets", {"presets": app.presets.list(), "preset": p.preset_name})
                     return self._json({"ok": ok})
                 if path == "/api/midi/learn" and app.midi:
+                    if app.controller and data.get("id"):
+                        app.controller.learn(None)
                     app.midi.learn(data.get("id"))
                     return self._json({"ok": True})
                 if path == "/api/midi/unmap" and app.midi:
                     app.midi.unmap(data["id"])
+                    return self._json({"ok": True})
+                c = app.controller
+                if path == "/api/ctrl/bank" and c:
+                    c.set_bank(int(data["bank"]))
+                    return self._json({"ok": True})
+                if path == "/api/ctrl/learn" and c:
+                    if app.midi:
+                        app.midi.learn(None)
+                    c.learn(data.get("slot"), int(data.get("index", 0)), bool(data.get("wizard")))
+                    return self._json({"ok": True})
+                if path == "/api/ctrl/clear" and c:
+                    c.clear(data["slot"], int(data["index"]))
+                    return self._json({"ok": True})
+                if path == "/api/ctrl/assign" and c:
+                    c.assign(int(data["bank"]), int(data["knob"]), data.get("id") or None)
+                    return self._json({"ok": True})
+                if path == "/api/ctrl/modwheel" and c:
+                    c.set_modwheel(data.get("id") or None)
                     return self._json({"ok": True})
                 if path == "/api/panic":
                     app.engine.panic()
