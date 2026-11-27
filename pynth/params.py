@@ -27,6 +27,7 @@ class Param:
     step: float = 0.0           # >0 rastet ein (Oktaven, Halbtoene, ...)
     unit: str = ""
     choices: tuple = field(default_factory=tuple)
+    preset: bool = True         # False = nicht Teil des Klangs (Preset laden laesst den Wert stehen)
 
     @property
     def is_choice(self) -> bool:
@@ -101,6 +102,9 @@ PARAMS: list[Param] = [
     Param("fx.delay_feedback", "Delay Feedback", "fx", 0, 0.9, 0.35),
     Param("fx.reverb_mix", "Hall Mix", "fx", 0, 1, 0.15),
     Param("fx.reverb_size", "Hall Größe", "fx", 0, 1, 0.6),
+
+    # Tempo der Looper-Wiedergabe (Noten kommen schneller/langsamer, Tonhoehe bleibt)
+    Param("looper.speed", "Tempo", "looper", 0.5, 2.0, 1.0, curve="exp", unit="×", preset=False),
 ]
 
 # Umbenannte Parameter (alte ID -> neue ID). Gilt fuer Presets, state.json und midi_map.json.
@@ -109,6 +113,7 @@ RENAMED = {"osc1.level": "mix.osc1", "osc2.level": "mix.osc2", "noise.level": "m
 GROUP_LABELS = {
     "osc1": "Oszillator 1", "osc2": "Oszillator 2", "noise": "Noise", "mix": "Mix",
     "env": "Hüllkurve (ADSR)", "filter": "Tiefpass-Filter", "lfo": "LFO", "fx": "Effekte",
+    "looper": "Looper",
 }
 
 
@@ -142,6 +147,8 @@ class ParamStore:
 
     def load_flat(self, flat: dict, name: str | None = None):
         for pid, p in self.params.items():
+            if not p.preset and pid not in flat:
+                continue                    # z.B. Looper-Tempo: Preset-Wechsel aendert es nicht
             self.values[pid] = p.clamp(flat.get(pid, p.default))
         if name:
             self.preset_name = name
