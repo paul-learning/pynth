@@ -39,10 +39,15 @@
   .key.b { background:#222; height:92px; z-index:2; }
   .key.down { background:var(--acc) !important; }
   #midiinfo { color:var(--dim); font-size:12px; padding:0 14px 10px; }
-  #bankpill { padding:4px 10px; border-radius:12px; background:var(--acc); color:#111; font-weight:600; font-size:12px; }
+  :root { --b0:#f0a03c; --b1:#4cb3e6; --b2:#8fd14f; --b3:#e66fb3; }
+  #bankpill { padding:6px 14px; border-radius:14px; background:var(--bank, var(--acc)); color:#111; font-weight:700;
+              font-size:15px; transition:background .15s; }
+  #bankpill.flash { animation:flash .4s; }
+  @keyframes flash { 0% { transform:scale(1.15); } 100% { transform:scale(1); } }
+  #ctrl { border-top:4px solid var(--bank, var(--acc)); }
   #ctrl { margin:0 14px; }
   #ctrl .banks { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
-  #ctrl .banks button.on { background:var(--acc); color:#111; border-color:var(--acc); font-weight:600; }
+  #ctrl .banks button.on { background:var(--bank); color:#111; border-color:var(--bank); font-weight:700; }
   #ctrl .knobs { display:grid; grid-template-columns:repeat(auto-fill,minmax(125px,1fr)); gap:8px; }
   .knob { border:1px solid var(--line); border-radius:8px; padding:6px 8px; }
   .knob .top { display:flex; justify-content:space-between; font-size:11px; color:var(--dim); }
@@ -56,12 +61,12 @@
   .slot { font-size:12px; padding:3px 8px; }
   .slot.armed { background:var(--learn); color:#fff; border-color:var(--learn); animation:blink 1s infinite; }
   .slot.unset { color:var(--dim); border-style:dashed; }
-  .row.inbank { outline:1px solid var(--acc); outline-offset:3px; border-radius:4px; }
+  .row.inbank { outline:2px solid var(--bank, var(--acc)); outline-offset:3px; border-radius:4px; }
   #midilog { background:#0e1013; border:1px solid var(--line); border-radius:6px; padding:6px 8px;
              max-height:220px; overflow:auto; font-size:11px; color:var(--fg); white-space:pre; user-select:text; }
   #midilog:empty::before { content:'noch nichts empfangen'; color:var(--dim); }
   .legend { color:var(--dim); font-size:12px; margin:8px 0 0; }
-  .badge { font-size:10px; color:#111; background:var(--acc); border-radius:3px; padding:0 4px; margin-left:4px; }
+  .badge { font-size:10px; color:#111; background:var(--bank, var(--acc)); border-radius:3px; padding:0 4px; margin-left:4px; }
 </style>
 </head>
 <body>
@@ -80,7 +85,7 @@
   <h2>Controller-Knobs</h2>
   <div class="banks" id="banks"></div>
   <div class="knobs" id="knobs"></div>
-  <p class="legend"><b>Bank belegen:</b> Pad drücken (oder oben die Bank wählen), dann „L“ am Regler klicken
+  <p class="legend"><b>Bank belegen:</b> Bank wählen (Pad = nächste Bank, oder oben anklicken), dann „L“ am Regler klicken
      und einen der 8 Knobs drehen. Rechtsklick auf „L“ entfernt die Belegung.<br>
      Orange umrandet mit K1–K8 = Regler der aktiven Bank. Orange Zahl statt „L“ = Regler direkt (in allen
      Bänken) einem CC zugeordnet, z.B. der große Drehregler auf Master.</p>
@@ -91,6 +96,7 @@
     <div class="slots"><button id="wizard">Einrichten</button><span id="learnhint"></span></div>
     <div class="slots" id="knobslots"></div>
     <div class="slots" id="padslots"></div>
+    <div class="slots" id="nextslot"></div>
     <div class="slots">Mod-Rad steuert: <select id="modwheel"></select></div>
     <p>MIDI-Monitor (letzte 40 Nachrichten, zum Kopieren markieren):</p>
     <pre id="midilog"></pre>
@@ -197,9 +203,12 @@ function buildCtrl() {
   if (!ctrl) return;
   $('#ctrl').hidden = false; $('#bankpill').hidden = false;
   const bank = ctrl.banks[ctrl.bank];
-  const bankLabel = (b, i) => `Pad ${i + 1}` + (b.name ? ` · ${b.name}` : '')
+  const bankLabel = (b, i) => `Bank ${i + 1}` + (b.name ? ` · ${b.name}` : '')
     + ` (${b.params.filter(Boolean).length}/8)`;
-  $('#bankpill').textContent = bankLabel(bank, ctrl.bank);
+  const pill = $('#bankpill'), txt = bankLabel(bank, ctrl.bank);
+  document.documentElement.style.setProperty('--bank', `var(--b${ctrl.bank})`);
+  if (pill.textContent && pill.textContent !== txt) { pill.classList.remove('flash'); void pill.offsetWidth; pill.classList.add('flash'); }
+  pill.textContent = txt;
   const bb = $('#banks'); bb.innerHTML = '';
   ctrl.banks.forEach((b, i) => {
     const x = document.createElement('button'); x.textContent = bankLabel(b, i);
@@ -229,8 +238,17 @@ function buildCtrl() {
       b.oncontextmenu = e => { e.preventDefault(); post('/api/ctrl/clear', {slot: kind, index: i}); };
       el.appendChild(b); }); };
   slots($('#knobslots'), 'knob', ctrl.knobs); slots($('#padslots'), 'pad', ctrl.pads);
+  { const el = $('#nextslot'), armed = ctrl.learn && ctrl.learn[0] === 'next', nb = ctrl.next_bank || [];
+    el.innerHTML = '<span title="Jeder Druck schaltet zur nächsten Bank (1→2→3→4→1). Für Pads, die alle dasselbe senden.">Weiter-Taste:</span>';
+    const b = document.createElement('button');
+    b.className = 'slot' + (armed ? ' armed' : '') + (nb.length ? '' : ' unset');
+    b.textContent = nb.length ? nb.map(specLabel).join(' / ') : '–';
+    b.title = 'Klicken und Taste/Pad drücken zum Anlernen, Rechtsklick = aus';
+    b.onclick = () => post('/api/ctrl/learn', armed ? {slot: null} : {slot: 'next'});
+    b.oncontextmenu = e => { e.preventDefault(); post('/api/ctrl/clear', {slot: 'next', index: 0}); };
+    el.appendChild(b); }
   const l = ctrl.learn;
-  $('#learnhint').textContent = l ? (l[0] === 'knob' ? `Jetzt Knob ${l[1] + 1} drehen ...` : `Jetzt Pad ${l[1] + 1} drücken ...`) : '';
+  $('#learnhint').textContent = l ? (l[0] === 'knob' ? `Jetzt Knob ${l[1] + 1} drehen ...` : l[0] === 'next' ? 'Jetzt die Weiter-Taste drücken ...' : `Jetzt Pad ${l[1] + 1} drücken ...`) : '';
   $('#wizard').textContent = l ? 'Abbrechen' : 'Einrichten';
   $('#wizard').onclick = () => post('/api/ctrl/learn', l ? {slot: null} : {slot: 'knob', index: 0, wizard: true});
   if (l) $('#setup').open = true;

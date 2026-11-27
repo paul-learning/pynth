@@ -125,7 +125,7 @@ class MidiManager:
                     self._show(f"Note {msg.note} (Kanal {ch}) Velocity {msg.velocity}")
                 if ctl and on and ctl.handle_note(ch, msg.note, msg.velocity):
                     return
-                if ctl and not on and ctl.is_pad_note(ch, msg.note):
+                if ctl and not on and ctl.handle_note_off(ch, msg.note):
                     return
                 if on:
                     self.engine.note_on(msg.note, msg.velocity)
