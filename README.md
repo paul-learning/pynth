@@ -140,6 +140,11 @@ Alle Bänke starten leer und werden selbst belegt:
   Bank, groß fürs Tablet, mit Regler-Name und aktuellem Wert. Wechselt mit, wenn man per Pad die
   Bank umschaltet. Freie Knobs sind gestrichelt. „Detail-Ansicht“ führt zurück; der Browser merkt
   sich die zuletzt gewählte Ansicht.
+  Mit **„✋ Touch an“** lassen sich die Werte auch am Tablet ändern: Kachel hoch/runter wischen,
+  bei Auswahl-Reglern (z.B. Wellenform) die Option antippen, Doppeltipp = Standardwert. Standard ist
+  „Touch aus“, damit beim Spielen nichts aus Versehen verstellt wird.
+* **Bänke benennen**: unter den Bank-Tasten in „Controller-Knobs“ (z.B. „Filter“, „FX“); der Name
+  steht dann in der Bank-Anzeige und groß in der Live-Ansicht.
 * **Mod-Rad** (CC 1) steuert standardmäßig die LFO-Tiefe, umstellbar in der Web-UI.
 * Gespeichert in `controller.json` (Nutzerdaten, nicht im Repo).
 * Eingehende MIDI-Nachrichten anzeigen: `~/pynth_venv/bin/python -m pynth --midi-monitor`
