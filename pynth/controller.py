@@ -47,14 +47,6 @@ DEFAULT_CONFIG = {
     "banks": [{"name": "", "params": [None] * N_KNOBS} for _ in range(N_PADS)],
 }
 
-# Fruehere Vorbelegung (bis PR 2). Steht sie unveraendert in controller.json, wird sie geleert.
-OLD_DEFAULT_BANKS = [
-    ["osc1.wave", "osc1.octave", "osc2.wave", "osc2.octave", "osc2.detune", "mix.osc1", "mix.osc2", "mix.noise"],
-    ["filter.cutoff", "filter.resonance", None, None, "env.attack", "env.decay", "env.sustain", "env.release"],
-    ["lfo.rate", "lfo.depth", "lfo.wave", "lfo.target", "noise.type", "mix.noise", None, None],
-    ["fx.delay_mix", "fx.delay_time", "fx.delay_feedback", None, "fx.reverb_mix", "fx.reverb_size", None, "master.volume"],
-]
-OLD_DEFAULT_NAMES = ["Osz + Mix", "Filter + Hüllkurve", "LFO + Noise", "Effekte + Master"]
 
 
 def _matches(spec: str | None, kind: str, channel: int, number: int) -> bool:
@@ -105,7 +97,6 @@ class Controller:
         if isinstance(data.get("modwheel"), dict):
             cfg["modwheel"].update(data["modwheel"])
         banks = data.get("banks")
-        migrated = False
         if isinstance(banks, list):
             for i, b in enumerate(banks[:N_PADS]):
                 if not isinstance(b, dict):
@@ -113,15 +104,7 @@ class Controller:
                 ps = list(b.get("params") or [])[:N_KNOBS]
                 ps = [p if p in self.params.params else None for p in ps]
                 ps += [None] * (N_KNOBS - len(ps))
-                name = str(b.get("name") or "")
-                if ps == OLD_DEFAULT_BANKS[i]:          # alte Vorbelegung -> leere Bank
-                    ps, migrated = [None] * N_KNOBS, True
-                if name == OLD_DEFAULT_NAMES[i]:
-                    name, migrated = "", True
-                cfg["banks"][i] = {"name": name, "params": ps}
-        if migrated:
-            log.info("Alte Bank-Vorbelegung entfernt, Baenke sind jetzt leer")
-            self._save()
+                cfg["banks"][i] = {"name": str(b.get("name") or ""), "params": ps}
 
     def _save(self):
         try:
