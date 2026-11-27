@@ -25,6 +25,7 @@ import re
 from pathlib import Path
 
 from .params import PARAMS, RENAMED
+from .storage import save_json
 
 _ALIASES = {"envelope": "env", "effects": "fx"}
 _KEY_ALIASES = {"type": "wave", "volume": "level", "reverb": "reverb_mix", "delay": "delay_mix"}
@@ -94,7 +95,7 @@ class PresetStore:
 
     def save(self, name: str, flat: dict) -> Path:
         f = self._find(name) or self.folder / f"{_slug(name)}.json"
-        f.write_text(json.dumps(nest(flat, name), indent=2, ensure_ascii=False) + "\n")
+        save_json(f, nest(flat, name), backup=False)
         return f
 
     def delete(self, name: str) -> bool:

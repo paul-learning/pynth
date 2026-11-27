@@ -13,7 +13,7 @@ controller.json (Nutzerdaten, nicht im Repo). Fehlt die Datei, gelten die Defaul
 from __future__ import annotations
 
 import copy
-import json
+from .storage import load_json, save_json
 import logging
 import time
 from pathlib import Path
@@ -88,12 +88,8 @@ class Controller:
 
     # ----------------------------- Datei -----------------------------
     def _load(self):
-        try:
-            data = json.loads(self.file.read_text())
-        except FileNotFoundError:
-            return
-        except (OSError, ValueError) as e:
-            log.warning("%s nicht lesbar (%s), nutze Defaults", self.file, e)
+        data = load_json(self.file)
+        if not isinstance(data, dict):
             return
         cfg = self.config
         for key, n in (("knobs", N_KNOBS), ("pads", N_PADS), ("transport", len(TRANSPORT))):
@@ -127,7 +123,7 @@ class Controller:
 
     def _save(self):
         try:
-            self.file.write_text(json.dumps(self.config, indent=2, ensure_ascii=False) + "\n")
+            save_json(self.file, self.config)
         except OSError as e:
             log.warning("Kann %s nicht schreiben: %s", self.file, e)
 

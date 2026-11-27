@@ -2,6 +2,9 @@
 state.json
 midi_map.json
 controller.json
+*.json.bak
+*.json.tmp
+*.json.broken
 
 # Python
 __pycache__/

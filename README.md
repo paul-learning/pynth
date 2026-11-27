@@ -54,6 +54,9 @@ cd ~/pynth
 ```
 
 **Update:** `cd ~/pynth && git pull` und danach `sudo systemctl restart pynth`.
+Nutzerdaten werden stromausfallsicher gespeichert (erst in eine Temp-Datei, dann atomar
+ersetzt, vorige Fassung als `*.bak`). Ist eine Datei nach einem Stromausfall kaputt, lädt
+Pynth automatisch die `.bak` und hebt die kaputte als `*.broken` auf.
 `midi_map.json` und `state.json` sind Nutzerdaten, stehen in `.gitignore` und bleiben
 bei `git pull` unangetastet. Fehlen sie, startet Pynth mit leerem Mapping bzw. Defaults.
 
