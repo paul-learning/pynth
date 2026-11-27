@@ -69,6 +69,9 @@
   #looper { margin:0 14px 12px; }
   #looper .tp { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
   #looper .tp button { min-width:84px; font-size:15px; padding:8px 12px; }
+  #lrange input { width:64px; padding:4px 6px; font:inherit; color:var(--fg); background:var(--card);
+                  border:1px solid var(--line); border-radius:6px; }
+  #lrange input.bad { border-color:var(--learn); }
   #looper .tp button.on { color:#111; font-weight:700; }
   #lrec.on { background:var(--learn); border-color:var(--learn); }
   #lplay.on { background:#46a758; border-color:#46a758; }
@@ -195,6 +198,10 @@
   </div>
   <div id="lbar"><div></div></div>
   <div id="ltext"></div>
+  <div class="slots" id="lrange" title="Bereich des Tempo-Reglers (Slider, Knob, Live-Ansicht). Erlaubt 0,1× bis 10×.">
+    Tempo-Regler von <input type="number" id="lsmin" min="0.1" max="10" step="0.05"> ×
+    bis <input type="number" id="lsmax" min="0.1" max="10" step="0.5"> ×
+    <span class="legend" style="margin:0">(0,1–10×, 1× bleibt Doppelklick)</span></div>
   <details>
     <summary class="legend" style="cursor:pointer">Tasten am Controller anlernen</summary>
     <p class="legend">Feld anklicken, dann die Taste am Controller drücken. Rechtsklick löscht.
@@ -319,8 +326,8 @@ function build(state) {
       ctl.appendChild(seg); entry.seg = seg;
     } else {
       const s = document.createElement('input'); s.type = 'range'; s.min = 0; s.max = 1000;
-      s.oninput = () => { const v = fromNorm(p, s.value / 1000); values[p.id] = v;
-                          entry.val.textContent = fmt(p, v); sendParam(p.id, v); };
+      s.oninput = () => { const v = fromNorm(schema[p.id], s.value / 1000); values[p.id] = v;
+                          entry.val.textContent = fmt(schema[p.id], v); sendParam(p.id, v); };
       s.ondblclick = () => { values[p.id] = p.default; refresh(p.id); sendParam(p.id, p.default); };
       ctl.appendChild(s); entry.slider = s;
     }
@@ -469,6 +476,20 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden && lo
 for (const [id, cmd] of [['#lrec', 'record'], ['#lstop', 'stop'], ['#lplay', 'play'], ['#lclear', 'clear'],
                          ['#lmrec', 'record'], ['#lmstop', 'stop'], ['#lmplay', 'play']])
   $(id).onclick = () => post('/api/looper', {cmd});
+// Einstellbarer Bereich des Tempo-Reglers
+function showRange() {
+  const p = schema['looper.speed']; if (!p) return;
+  for (const [id, v] of [['#lsmin', p.min], ['#lsmax', p.max]]) {
+    const el = $(id); if (document.activeElement !== el) el.value = +v.toFixed(3); el.classList.remove('bad'); }
+}
+function sendRange() {
+  const lo = parseFloat($('#lsmin').value.replace(',', '.')), hi = parseFloat($('#lsmax').value.replace(',', '.'));
+  const bad = !(lo >= 0.1 && hi <= 10 && hi > lo * 1.01);
+  $('#lsmin').classList.toggle('bad', bad); $('#lsmax').classList.toggle('bad', bad);
+  if (!bad) post('/api/range', {id: 'looper.speed', min: lo, max: hi});
+}
+$('#lsmin').onchange = $('#lsmax').onchange = sendRange;
+function applySchema(p) { schema[p.id] = p; showRange(); refresh(p.id); }
 function buildTransport() {
   const el = $('#tpslots'); if (!ctrl || !ctrl.transport) return;
   el.innerHTML = '';
@@ -554,13 +575,13 @@ function liveTouch(t, p) {
     if (now - lastTap < 300) { setLiveValue(p, p.default); lastTap = 0; return; }   // Doppeltipp = Standard
     lastTap = now;
     t.setPointerCapture(e.pointerId); t.classList.add('drag');
-    drag = {y: e.clientY, n: Math.max(0, Math.min(1, toNorm(p, values[p.id])))};
+    drag = {y: e.clientY, n: Math.max(0, Math.min(1, toNorm(schema[p.id], values[p.id])))};
   };
   t.onpointermove = e => {
     if (!drag) return;
     const range = Math.max(200, t.clientHeight * 1.5);   // ganze Kachelhöhe ~ 2/3 des Bereichs
     const n = Math.max(0, Math.min(1, drag.n + (drag.y - e.clientY) / range));
-    setLiveValue(p, fromNorm(p, n));
+    setLiveValue(p, fromNorm(schema[p.id], n));
   };
   t.onpointerup = t.onpointercancel = () => { drag = null; t.classList.remove('drag'); };
 }
@@ -633,12 +654,13 @@ async function init() {
   values = st.values; if (st.midi) midi = st.midi; ctrl = st.controller; window.groupLabels = st.groups;
   if (st.looper) setLooper(st.looper);
   if (!ctrl) $('#livemsg').hidden = false;
-  build(st); setPresets(st.presets, st.preset); setStatus(st.status); refreshMidi();
+  build(st); setPresets(st.presets, st.preset); setStatus(st.status); refreshMidi(); showRange();
   const es = new EventSource('/api/events');
   es.addEventListener('param', e => { const d = JSON.parse(e.data);
     if (d.source === 'web' && timers[d.id]) return; values[d.id] = d.value; refresh(d.id); });
   es.addEventListener('values', e => { const d = JSON.parse(e.data); values = d.values;
     for (const id in values) refresh(id); setPresets([...$('#presets').options].slice(1).map(o => o.value), d.preset); });
+  es.addEventListener('schema', e => applySchema(JSON.parse(e.data)));
   es.addEventListener('presets', e => { const d = JSON.parse(e.data); setPresets(d.presets, d.preset); });
   es.addEventListener('midi', e => { midi = JSON.parse(e.data); refreshMidi(); });
   es.addEventListener('midilast', e => { midi.last = JSON.parse(e.data); refreshMidi(); });
