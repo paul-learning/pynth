@@ -142,9 +142,14 @@ Damit die Web-UI auch ohne Router/Internet erreichbar ist:
 * **Bekanntes WLAN in Reichweite** → der Pi verbindet sich wie gewohnt, UI unter **http://pynth.local:8080**.
 * **Kein bekanntes WLAN** (ca. 60 s nach dem Start oder nach Verbindungsverlust) → der Pi macht den
   Hotspot **„pynth“** auf (Passwort `pynthpynth`, änderbar in `/etc/default/pynth-wifi`).
-  Handy damit verbinden, dann **http://10.42.0.1:8080** (oder pynth.local).
+  Handy damit verbinden, dann **http://pynth.home** (oder http://10.42.0.1). Port 80 wird auf 8080
+  weitergeleitet, `:8080` braucht man also nicht mehr (geht aber weiter).
 * **Im Hotspot**: alle 5 Minuten, wenn gerade kein Gerät verbunden ist, schaut der Pi kurz,
   ob ein bekanntes WLAN wieder da ist, und wechselt dorthin.
+* **Im Hotspot, Kasten „WLAN“**: „Ins bekannte WLAN wechseln“ schaltet den Hotspot aus und verbindet ein
+  gespeichertes WLAN in Reichweite (sonst ist der Hotspot nach ca. 1 Minute wieder da). Gespeicherte WLANs
+  sind in der Liste markiert: antippen, Passwort leer lassen, „Verbinden“. „Neu suchen“ schaltet den Hotspot
+  ca. 20 s aus, um die Liste zu aktualisieren.
 * **Web-UI → Kasten „WLAN“**: WLANs suchen, auswählen, Passwort eingeben, verbinden. Neue Netze
   werden gespeichert. Klappt die Verbindung nicht, wird ein falsches Passwort zurückgenommen und
   der Pi geht zurück ins vorige WLAN bzw. in den Hotspot. Im Hotspot zeigt die Liste den letzten Scan

@@ -1,2 +1,2 @@
-# Die Web-UI (Benutzer pynth) darf nur diese drei Befehle als root ausfuehren.
-pynth ALL=(root) NOPASSWD: /usr/local/sbin/pynth-wifi scan, /usr/local/sbin/pynth-wifi connect, /usr/local/sbin/pynth-wifi hotspot
+# Die Web-UI (Benutzer pynth) darf nur diese Befehle als root ausfuehren.
+pynth ALL=(root) NOPASSWD: /usr/local/sbin/pynth-wifi scan, /usr/local/sbin/pynth-wifi connect, /usr/local/sbin/pynth-wifi hotspot, /usr/local/sbin/pynth-wifi known, /usr/local/sbin/pynth-wifi rescan

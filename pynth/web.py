@@ -22,6 +22,8 @@ GET  /api/wifi        WLAN-Status (Modus client/hotspot, Verbindung, IP)
 POST /api/wifi/scan                                       WLANs suchen
 POST /api/wifi/connect{"ssid": "MeinWLAN", "password": "..."}  verbindet im Hintergrund
 POST /api/wifi/hotspot                                    Hotspot jetzt starten
+POST /api/wifi/known                                      Hotspot aus, bekanntes WLAN suchen (sonst Hotspot wieder an)
+POST /api/wifi/rescan                                     WLAN-Liste neu (im Hotspot ca. 20 s weg)
 """
 from __future__ import annotations
 
@@ -188,6 +190,10 @@ def make_handler(app: App):
                     return self._json({"ok": ok, "error": None if ok else "WLAN ist gerade beschaeftigt"})
                 if path == "/api/wifi/hotspot":
                     return self._json({"ok": app.wifi.hotspot()})
+                if path == "/api/wifi/known":
+                    return self._json({"ok": app.wifi.known()})
+                if path == "/api/wifi/rescan":
+                    return self._json({"ok": app.wifi.rescan()})
                 if path == "/api/looper":
                     cmd = str(data.get("cmd"))
                     if cmd not in ("record", "stop", "play", "clear"):
