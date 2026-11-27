@@ -91,6 +91,43 @@
   #wifilist button.sel { border-color:var(--acc); }
   #wifilist small { color:var(--dim); }
   #wifimsg.err { color:var(--learn); } #wifimsg.ok { color:#46a758; }
+
+  /* --- Live-Ansicht: nur die 8 Knobs der aktiven Bank, groß fürs Tablet --- */
+  #viewbtn { font-weight:700; }
+  :root { --u:min(1vw, 1.6vh); }                                  /* Schriftgroesse waechst mit dem Bildschirm */
+  @media (orientation:portrait) { :root { --u:min(2vw, 1vh); } }
+  #live { display:none; }
+  body.live #live { display:flex; }
+  body.live #midiinfo, body.live #looper, body.live #ctrl, body.live #wifi, body.live #groups, body.live #kbwrap,
+  body.live #presets, body.live #pname, body.live #save, body.live #del, body.live #status, body.live #bankpill { display:none; }
+  body.live header { flex-wrap:nowrap; }
+  body.live #viewbtn { margin-left:auto; }
+  body.live { display:flex; flex-direction:column; height:100vh; height:100dvh; overflow:hidden; }
+  #live { flex-direction:column; gap:12px; padding:12px 14px 14px; flex:1; min-height:0; overflow-y:auto; }
+  #livehead { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  #livebank { font-size:clamp(22px, calc(4 * var(--u)), 40px); font-weight:800; color:var(--bank, var(--acc)); letter-spacing:.02em; }
+  #livebank.flash { animation:flash .4s; }
+  #livebanks { display:flex; gap:8px; margin-left:auto; }
+  #livebanks button { min-width:56px; min-height:44px; font-size:18px; font-weight:700; }
+  #livebanks button.on { background:var(--bank); border-color:var(--bank); color:#111; }
+  #liveknobs { flex:1; min-height:0; display:grid; gap:12px; grid-template-columns:repeat(4, 1fr); grid-auto-rows:minmax(min-content, 1fr); }
+  @media (orientation:portrait) { #liveknobs { grid-template-columns:repeat(2, 1fr); } }
+  .lk { position:relative; background:var(--card); border:2px solid var(--line); border-top:6px solid var(--bank, var(--acc));
+        border-radius:14px; padding:12px 14px; display:flex; flex-direction:column; min-height:0; overflow:hidden; }
+  .lk .no { font-size:clamp(13px, calc(1.6 * var(--u)), 18px); color:var(--dim); font-weight:700; display:flex; justify-content:space-between; }
+  .lk .grp { font-size:clamp(11px, calc(1.3 * var(--u)), 15px); color:var(--dim); text-transform:uppercase; letter-spacing:.06em; margin-top:4px;
+             white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .lk .nm { font-size:clamp(18px, calc(2.6 * var(--u)), 32px); font-weight:700; line-height:1.15; overflow:hidden; text-overflow:ellipsis; }
+  .lk .v { margin-top:auto; font-size:clamp(26px, calc(4.4 * var(--u)), 58px); font-weight:800; font-variant-numeric:tabular-nums;
+           line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .lk .bar { height:clamp(8px, calc(1.2 * var(--u)), 14px); background:#0e1013; border-radius:7px; margin-top:8px; overflow:hidden; }
+  .lk .bar div { height:100%; width:0; background:var(--bank, var(--acc)); border-radius:7px; transition:width .06s linear; }
+  .lk .pk { font-size:clamp(11px, calc(1.3 * var(--u)), 15px); font-weight:600; }
+  .lk .pk.no2 { color:var(--learn); } .lk .pk.ok { color:#46a758; }
+  .lk.empty { border-style:dashed; border-top-style:dashed; border-top-color:var(--line); background:transparent; }
+  .lk.empty .nm { color:var(--dim); font-weight:500; }
+  .lk.hot { border-color:var(--bank, var(--acc)); }
+  #livemsg { color:var(--dim); font-size:18px; }
 </style>
 </head>
 <body>
@@ -101,10 +138,16 @@
   <button id="save">Speichern</button>
   <button id="del" title="Ausgewähltes Preset löschen">Löschen</button>
   <button id="panic" title="Alle Noten aus">Panic</button>
+  <button id="viewbtn" title="Zwischen Detail-Ansicht und Live-Ansicht (nur die 8 Knobs der aktiven Bank) wechseln">Live-Ansicht</button>
   <span id="looppill" hidden></span>
   <span id="bankpill" title="Aktive Knob-Bank (Pads am Controller schalten um)" hidden></span>
   <div id="status">verbinde ...</div>
 </header>
+<section id="live">
+  <div id="livehead"><span id="livebank">Bank 1</span><div id="livebanks"></div></div>
+  <div id="liveknobs"></div>
+  <div id="livemsg" hidden>Kein Controller gefunden: die Live-Ansicht zeigt die Knob-Bänke, sobald ein MIDI-Controller da ist.</div>
+</section>
 <div id="midiinfo"></div>
 <section class="card" id="looper">
   <h2>Looper</h2>
@@ -290,6 +333,7 @@ function buildCtrl() {
     kb.appendChild(d);
   });
   refreshKnobVals();
+  buildLive();
   buildTransport();
   const slots = (el, kind, list) => { el.innerHTML = `<span>${kind === 'knob' ? 'Knobs' : 'Pads'}:</span>`;
     list.forEach((s, i) => { const b = document.createElement('button');
@@ -375,6 +419,63 @@ function buildTransport() {
   });
 }
 
+
+// --- Live-Ansicht ---
+let liveBankShown = null;
+const liveTiles = {};   // pid -> [{v, bar, tile}]
+function buildLive() {
+  if (!ctrl) return;
+  $('#livemsg').hidden = true;
+  const bank = ctrl.banks[ctrl.bank];
+  const lb = $('#livebank');
+  lb.textContent = `Bank ${ctrl.bank + 1}` + (bank.name ? ` · ${bank.name}` : '');
+  if (liveBankShown !== null && liveBankShown !== ctrl.bank) { lb.classList.remove('flash'); void lb.offsetWidth; lb.classList.add('flash'); }
+  liveBankShown = ctrl.bank;
+  const bb = $('#livebanks'); bb.innerHTML = '';
+  ctrl.banks.forEach((b, i) => {
+    const x = document.createElement('button'); x.textContent = i + 1;
+    x.title = `Bank ${i + 1}` + (b.name ? ` · ${b.name}` : '') + ` (${b.params.filter(Boolean).length}/8)`;
+    x.style.setProperty('--bank', `var(--b${i})`);
+    x.classList.toggle('on', i === ctrl.bank); x.onclick = () => post('/api/ctrl/bank', {bank: i});
+    bb.appendChild(x);
+  });
+  const grid = $('#liveknobs'); grid.innerHTML = '';
+  for (const k in liveTiles) delete liveTiles[k];
+  bank.params.forEach((pid, i) => {
+    const p = pid && schema[pid], t = document.createElement('div');
+    t.className = 'lk' + (p ? '' : ' empty');
+    if (!p) { t.innerHTML = `<div class="no"><span>K${i + 1}</span></div><div class="nm">frei</div>`; grid.appendChild(t); return; }
+    const pk = ctrl.takeover === 'pickup'
+      ? `<span class="pk ${ctrl.picked[i] ? 'ok' : 'no2'}">${ctrl.picked[i] ? '● greift' : '○ abholen'}</span>` : '';
+    t.innerHTML = `<div class="no"><span>K${i + 1}</span>${pk}</div>`
+      + `<div class="grp">${esc((window.groupLabels || {})[p.group] || p.group)}</div>`
+      + `<div class="nm">${esc(p.label)}</div><div class="v"></div><div class="bar"><div></div></div>`;
+    (liveTiles[pid] = liveTiles[pid] || []).push({v: t.querySelector('.v'), bar: t.querySelector('.bar div'), tile: t});
+    grid.appendChild(t);
+    refreshLive(pid, true);
+  });
+}
+const hotTimers = new WeakMap();
+function refreshLive(id, quiet) {
+  const tiles = liveTiles[id], p = schema[id]; if (!tiles || !p || values[id] === undefined) return;
+  const v = values[id], n = p.choices.length ? (Math.max(0, p.choices.indexOf(v)) + 1) / p.choices.length
+                                           : Math.max(0, Math.min(1, toNorm(p, v)));
+  for (const t of tiles) {
+    t.v.textContent = fmt(p, v); t.bar.style.width = (n * 100) + '%';
+    if (!quiet && document.body.classList.contains('live')) {   // kurz aufleuchten, wenn sich der Wert ändert
+      t.tile.classList.add('hot'); clearTimeout(hotTimers.get(t.tile));
+      hotTimers.set(t.tile, setTimeout(() => t.tile.classList.remove('hot'), 250));
+    }
+  }
+}
+function setView(live) {
+  document.body.classList.toggle('live', live);
+  $('#viewbtn').textContent = live ? 'Detail-Ansicht' : 'Live-Ansicht';
+  try { localStorage.setItem('pynthView', live ? 'live' : 'detail'); } catch (e) {}
+}
+$('#viewbtn').onclick = () => setView(!document.body.classList.contains('live'));
+try { setView(localStorage.getItem('pynthView') === 'live'); } catch (e) { setView(false); }
+
 function refreshKnobVals() {
   for (const el of document.querySelectorAll('#knobs .kv')) {
     const pid = el.dataset.pid; el.textContent = pid && schema[pid] ? fmt(schema[pid], values[pid]) : '';
@@ -387,7 +488,7 @@ function refresh(id) {
   e.val.textContent = fmt(p, v);
   if (e.slider && document.activeElement !== e.slider) e.slider.value = Math.round(toNorm(p, v) * 1000);
   if (e.seg) for (const b of e.seg.children) b.classList.toggle('on', b.dataset.v === v);
-  if (ctrl && ctrl.banks[ctrl.bank].params.includes(id)) refreshKnobVals();
+  if (ctrl && ctrl.banks[ctrl.bank].params.includes(id)) { refreshKnobVals(); refreshLive(id); }
 }
 
 function refreshMidi() {
@@ -425,6 +526,7 @@ async function init() {
   const st = await (await fetch('/api/state')).json();
   values = st.values; if (st.midi) midi = st.midi; ctrl = st.controller; window.groupLabels = st.groups;
   if (st.looper) setLooper(st.looper);
+  if (!ctrl) $('#livemsg').hidden = false;
   build(st); setPresets(st.presets, st.preset); setStatus(st.status); refreshMidi();
   const es = new EventSource('/api/events');
   es.addEventListener('param', e => { const d = JSON.parse(e.data);
