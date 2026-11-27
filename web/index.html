@@ -76,11 +76,30 @@
   #lbar { height:8px; background:#0e1013; border:1px solid var(--line); border-radius:4px; margin:10px 0 6px; overflow:hidden; }
   #lbar div { height:100%; width:0; background:var(--acc); }
   #ltext { font-size:12px; color:var(--dim); }
-  #looppill { padding:6px 12px; border-radius:14px; font-weight:700; font-size:13px; color:#111; }
-  #looppill.rec { background:var(--learn); color:#fff; }
-  #looppill.armed { background:var(--learn); color:#fff; animation:blink 1s infinite; }
-  #looppill.play { background:#46a758; }
-  #looppill.dub { background:#e5484d; color:#fff; box-shadow:0 0 0 3px #46a758 inset; }
+  /* Looper-Mini-Anzeige im Header (beide Ansichten) */
+  #loopmini { display:flex; align-items:center; gap:6px; padding:4px 8px; border:1px solid var(--line);
+              border-radius:10px; background:var(--card); --lc:var(--dim); }
+  #loopmini .lm { width:30px; height:30px; padding:0; display:grid; place-items:center; font-size:14px;
+                  color:var(--dim); background:transparent; border:1px solid var(--line); border-radius:6px; }
+  #loopmini .lm.on { color:#fff; border-color:var(--lc); background:var(--lc); }
+  #lmrec.on { --lc:var(--learn); background:var(--learn); border-color:var(--learn); }
+  #lmrec.armed { color:#fff; background:var(--learn); border-color:var(--learn); animation:blink 1s infinite; }
+  #lmplay.on { background:#46a758; border-color:#46a758; color:#111; }
+  #lmstop.on { color:var(--fg); border-color:var(--dim); }
+  #loopmini .lmbox { display:flex; flex-direction:column; gap:3px; width:110px; }
+  #lmbar { position:relative; height:6px; background:#0e1013; border-radius:3px; overflow:hidden; }
+  #lmbar div { position:absolute; left:0; top:0; bottom:0; width:0; background:var(--lc); }
+  #lmtxt { font-size:11px; font-variant-numeric:tabular-nums; color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #loopmini.rec { --lc:var(--learn); border-color:var(--learn); }
+  #loopmini.play { --lc:#46a758; border-color:#46a758; }
+  #loopmini.dub { --lc:var(--learn); border-color:#46a758; box-shadow:0 0 0 1px var(--learn) inset; }
+  @media (max-width:600px) {     /* Handy: eigene Zeile, Balken über die ganze Breite */
+    html body.live header { flex-wrap:wrap; }
+    #loopmini { order:10; flex:1 1 100%; }
+    #loopmini .lmbox { flex:1; width:auto; }
+  }
+  #loopmini.dub #lmtxt, #loopmini.rec #lmtxt { color:#ff8a8d; }
+  #loopmini.play #lmtxt { color:#7fd18a; }
   .badge { font-size:10px; color:#111; background:var(--bank, var(--acc)); border-radius:3px; padding:0 4px; margin-left:4px; }
   #wifi { margin:0 14px 12px; }
   #wifi summary { cursor:pointer; list-style:none; display:flex; gap:10px; align-items:baseline; }
@@ -149,7 +168,12 @@
   <button id="del" title="Ausgewähltes Preset löschen">Löschen</button>
   <button id="panic" title="Alle Noten aus">Panic</button>
   <button id="viewbtn" title="Zwischen Detail-Ansicht und Live-Ansicht (nur die 8 Knobs der aktiven Bank) wechseln">Live-Ansicht</button>
-  <span id="looppill" hidden></span>
+  <div id="loopmini" title="Looper: Record / Stop / Play">
+    <button class="lm" id="lmrec" title="Record (während Wiedergabe: Overdub)">●</button>
+    <button class="lm" id="lmstop" title="Stop">■</button>
+    <button class="lm" id="lmplay" title="Play">▶</button>
+    <div class="lmbox"><div id="lmbar"><div></div></div><span id="lmtxt">Looper leer</span></div>
+  </div>
   <span id="bankpill" title="Aktive Knob-Bank (Pads am Controller schalten um)" hidden></span>
   <div id="status">verbinde ...</div>
 </header>
@@ -402,10 +426,12 @@ function setLooper(d) {
   const s = d.state;
   $('#lrec').className = s === 'armed' ? 'armed' : (s === 'recording' || s === 'overdub') ? 'on' : '';
   $('#lplay').className = (s === 'playing' || s === 'overdub') ? 'on' : '';
-  const pill = $('#looppill');
-  pill.hidden = s === 'empty' || s === 'stopped';
-  pill.className = {armed: 'armed', recording: 'rec', playing: 'play', overdub: 'dub'}[s] || '';
+  $('#loopmini').className = {armed: 'rec', recording: 'rec', playing: 'play', overdub: 'dub'}[s] || '';
+  $('#lmrec').className = 'lm' + (s === 'armed' ? ' armed' : (s === 'recording' || s === 'overdub') ? ' on' : '');
+  $('#lmplay').className = 'lm' + ((s === 'playing' || s === 'overdub') ? ' on' : '');
+  $('#lmstop').className = 'lm' + (s === 'stopped' ? ' on' : '');
   drawLooper();
+  if (s !== 'empty' && s !== 'stopped') animLooper();
 }
 function drawLooper() {
   if (!loop) return;
@@ -417,12 +443,22 @@ function drawLooper() {
   else if (s === 'armed') t = '● REC bereit';
   $('#lbar div').style.width = (frac * 100) + '%';
   $('#lbar div').style.background = s === 'recording' || s === 'overdub' ? 'var(--learn)' : s === 'playing' ? '#46a758' : 'var(--acc)';
-  $('#looppill').textContent = t;
+  $('#lmbar div').style.width = (frac * 100) + '%';
+  $('#lmtxt').textContent = t || (s === 'stopped' ? `■ ${loop.length.toFixed(1)} s bereit` : 'Looper leer');
   $('#ltext').textContent = LOOP_TXT[s] + (loop.length ? `  ·  Schleife ${loop.length.toFixed(1)} s, ${loop.notes} Noten` : '')
     + (s === 'recording' || s === 'armed' ? `  ·  max. ${loop.max} s` : '');
 }
-setInterval(() => { if (loop && loop.state !== 'empty' && loop.state !== 'stopped') drawLooper(); }, 100);
-for (const [id, cmd] of [['#lrec', 'record'], ['#lstop', 'stop'], ['#lplay', 'play'], ['#lclear', 'clear']])
+// Position wird im Browser aus Länge + Startzeit gerechnet: kein zusätzlicher Netzverkehr
+let loopAnim = false;
+function animLooper() {
+  if (loopAnim) return; loopAnim = true;
+  const step = () => { if (!loop || loop.state === 'empty' || loop.state === 'stopped' || document.hidden) { loopAnim = false; return; }
+    drawLooper(); requestAnimationFrame(step); };
+  requestAnimationFrame(step);
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden && loop) animLooper(); });
+for (const [id, cmd] of [['#lrec', 'record'], ['#lstop', 'stop'], ['#lplay', 'play'], ['#lclear', 'clear'],
+                         ['#lmrec', 'record'], ['#lmstop', 'stop'], ['#lmplay', 'play']])
   $(id).onclick = () => post('/api/looper', {cmd});
 function buildTransport() {
   const el = $('#tpslots'); if (!ctrl || !ctrl.transport) return;
