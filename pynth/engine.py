@@ -33,6 +33,11 @@ PINK_GAIN = 12.0
 SUB_BLOCK = 256           # Filter-Teilblock ohne LFO (Cutoff-Glaettung)
 SUB_BLOCK_LFO = 64        # mit LFO aufs Filter: feiner, sonst "treppt" der Cutoff hoerbar (Knackser)
 LFO_SMOOTH_S = 0.002      # Square/Saw-LFO: Spruenge ueber ~2 ms glaetten (One-Pole)
+LADDER_K_MAX = 4.15       # Resonanz 1 -> k knapp ueber 4: sanfte Selbstoszillation
+LADDER_COMP = 0.5         # Bass-Ausgleich: Ladder verliert mit Resonanz Pegel
+DRIVE_DB = 24.0           # Drive 1 = +24 dB in die Saettigung
+DRIVE_MAKEUP = 0.55       # davon wird ein Teil am Ausgang wieder abgezogen
+LADDER_GAIN = 1.3         # 24 dB/Okt. nimmt mehr Obertoene weg: Pegel wie beim alten Filter
 HEADROOM = 0.25           # Pegel pro Stimme vor dem Filter; 8 Stimmen bleiben unter dem Limiter
 EXP_K = 6.9   # exp(-6.9) ~ -60 dB: Decay/Release sind "fertig" nach der eingestellten Zeit
 
@@ -78,7 +83,7 @@ class Engine:
         self.pedal = False
         self.lfo_phase = 0.0
         self.filter_zi = np.zeros(2)          # Biquad-Zustand (numpy-Pfad)
-        self.svf_state = np.zeros(2)          # SVF-Zustand (C-Pfad)
+        self.ladder_state = np.zeros(4)       # Ladder-Zustand (C-Pfad)
         self.lfo_zi = np.zeros(1)             # Glaettung fuer Square/Saw-LFO
         c = math.exp(-1.0 / (LFO_SMOOTH_S * samplerate))
         self.lfo_smooth = (np.array([1.0 - c]), np.array([1.0, -c]))
@@ -333,19 +338,25 @@ class Engine:
             mix += p["mix.noise"] * env_sum * self._noise(p["noise.type"], n)
         mix *= HEADROOM
 
-        # Filter: C-Kern mit Cutoff pro Sample (SVF), sonst Biquad in Teilbloecken
+        # Filter: C-Kern = Ladder mit Saettigung, Cutoff pro Sample; sonst Biquad in Teilbloecken
         cutoff = p["filter.cutoff"]
         prev = self.cutoff_now if self.cutoff_now is not None else cutoff
         self.cutoff_now = cutoff
-        q = 0.707 * 20.0 ** p["filter.resonance"]
+        res, drive = p["filter.resonance"], p.get("filter.drive", 0.0)
+        pre = 10.0 ** (drive * DRIVE_DB / 20.0)       # Vorverstaerkung in die Saettigung
+        makeup = pre ** -DRIVE_MAKEUP                  # lauter wird es trotzdem etwas, wie analog
+        lfo_f = lfo if target == "filter" else None
         if fast.lib is not None:
-            out = self._filter_c(mix, n, ramp, prev, cutoff, q, lfo if target == "filter" else None, depth)
-        else:
-            out = self._filter_np(mix, n, prev, cutoff, q, lfo if target == "filter" else None, depth)
+            out = self._filter_c(mix, n, ramp, prev, cutoff, res, pre, makeup * LADDER_GAIN, lfo_f, depth)
+        else:                                          # Ersatz: Saettigung vor dem Biquad
+            if drive > 0:
+                mix = np.tanh(mix * pre) * makeup
+            q = 0.707 * 20.0 ** res
+            out = self._filter_np(mix, n, prev, cutoff, q, lfo_f, depth)
         return self._post(out, p, n, ramp, lfo, target, depth, t0)
 
-    def _filter_c(self, mix, n, ramp, prev, cutoff, q, lfo, depth):
-        """SVF mit Cutoff pro Sample: weicher Verlauf, auch bei voller LFO-Tiefe."""
+    def _filter_c(self, mix, n, ramp, prev, cutoff, res, pre, makeup, lfo, depth):
+        """4-Pol-Ladder mit Saettigung, Cutoff pro Sample (weich auch bei voller LFO-Tiefe)."""
         lc0 = math.log(prev)
         logc = lc0 + (math.log(cutoff) - lc0) * ((ramp + 1.0) / n)
         if lfo is not None:
@@ -353,8 +364,9 @@ class Engine:
         cuts = np.exp(logc)
         np.clip(cuts, 20.0, 0.45 * self.sr, out=cuts)
         out = np.empty(n)
-        fast.lib.svf_lowpass(n, fast.ptr(mix), fast.ptr(out), fast.ptr(cuts),
-                             1.0 / q, float(self.sr), fast.ptr(self.svf_state))
+        k = LADDER_K_MAX * res
+        fast.lib.ladder_lowpass(n, fast.ptr(mix), fast.ptr(out), fast.ptr(cuts), k, pre, makeup,
+                                1.0 + LADDER_COMP * k, float(self.sr), fast.ptr(self.ladder_state))
         return out
 
     def _filter_np(self, mix, n, prev, cutoff, q, lfo, depth):

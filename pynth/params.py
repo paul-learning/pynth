@@ -91,6 +91,7 @@ PARAMS: list[Param] = [
 
     Param("filter.cutoff", "Cutoff", "filter", 40, 18000, 2500, curve="exp", unit="Hz"),
     Param("filter.resonance", "Resonanz", "filter", 0, 1, 0.2),
+    Param("filter.drive", "Drive", "filter", 0, 1, 0.0),
 
     Param("lfo.wave", "Wellenform", "lfo", default="sine", choices=("sine", "triangle", "square", "saw")),
     Param("lfo.target", "Ziel", "lfo", default="filter", choices=("off", "filter", "pitch", "volume")),
@@ -112,7 +113,7 @@ RENAMED = {"osc1.level": "mix.osc1", "osc2.level": "mix.osc2", "noise.level": "m
 
 GROUP_LABELS = {
     "osc1": "Oszillator 1", "osc2": "Oszillator 2", "noise": "Noise", "mix": "Mix",
-    "env": "Hüllkurve (ADSR)", "filter": "Tiefpass-Filter", "lfo": "LFO", "fx": "Effekte",
+    "env": "Hüllkurve (ADSR)", "filter": "Ladder-Filter", "lfo": "LFO", "fx": "Effekte",
     "looper": "Looper",
 }
 

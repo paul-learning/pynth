@@ -156,3 +156,39 @@ void feedback_line(int n, const double *x, double *v, double *vd,
     }
     *w = wp;
 }
+
+/* 4-Pol-Ladder-Tiefpass (24 dB/Okt.) im Stil des Moog-Filters, als
+ * Zero-Delay-Feedback-Struktur aus vier TPT-One-Poles (Zavalishin).
+ * Saettigung: tanh() am Eingang der Kette (nach der Rueckkopplung). Dadurch
+ * bleibt die Resonanz begrenzt: bei k > 4 schwingt das Filter sanft selbst,
+ * statt zu explodieren.
+ *  cutoff: Hz pro Sample (schon begrenzt), k: Resonanz 0..~4.2
+ *  drive: Vorverstaerkung in die Saettigung, makeup: Ausgangspegel
+ *  comp: Bass-Ausgleich (Ladder verliert mit Resonanz Pegel)
+ *  state: 4 doubles */
+void ladder_lowpass(int n, const double *x, double *y, const double *cutoff,
+                    double k, double drive, double makeup, double comp,
+                    double sr, double *state)
+{
+    double s1 = state[0], s2 = state[1], s3 = state[2], s4 = state[3];
+    double pi_sr = M_PI / sr;
+    for (int i = 0; i < n; i++) {
+        double g = tan(cutoff[i] * pi_sr);
+        double G = g / (1.0 + g);
+        double inv = 1.0 / (1.0 + g);
+        /* Ausgang der Kette ohne Eingang (nur Zustaende) */
+        double S = (G * G * G * s1 + G * G * s2 + G * s3 + s4) * inv;
+        double G4 = G * G * G * G;
+        double u = (drive * comp * x[i] - k * S) / (1.0 + k * G4);
+        u = tanh(u);
+        double v, y1, y2, y3, y4;
+        v = (u - s1) * G;  y1 = v + s1; s1 = y1 + v;
+        v = (y1 - s2) * G; y2 = v + s2; s2 = y2 + v;
+        v = (y2 - s3) * G; y3 = v + s3; s3 = y3 + v;
+        v = (y3 - s4) * G; y4 = v + s4; s4 = y4 + v;
+        y[i] = y4 * makeup;
+    }
+    if (!isfinite(s1) || !isfinite(s2) || !isfinite(s3) || !isfinite(s4))
+        s1 = s2 = s3 = s4 = 0.0;
+    state[0] = s1; state[1] = s2; state[2] = s3; state[3] = s4;
+}
