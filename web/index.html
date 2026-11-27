@@ -118,7 +118,7 @@
   .lk .grp { font-size:clamp(11px, calc(1.3 * var(--u)), 15px); color:var(--dim); text-transform:uppercase; letter-spacing:.06em; margin-top:4px;
              white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .lk .nm { font-size:clamp(18px, calc(2.6 * var(--u)), 32px); font-weight:700; line-height:1.15; overflow:hidden; text-overflow:ellipsis; }
-  .lk .v { margin-top:auto; font-size:clamp(26px, calc(4.4 * var(--u)), 58px); font-weight:800; font-variant-numeric:tabular-nums;
+  .lk .v { margin-top:auto; font-size:clamp(26px, calc(4.2 * var(--u)), 58px); font-weight:800; font-variant-numeric:tabular-nums;
            line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .lk .bar { height:clamp(8px, calc(1.2 * var(--u)), 14px); background:#0e1013; border-radius:7px; margin-top:8px; overflow:hidden; }
   .lk .bar div { height:100%; width:0; background:var(--bank, var(--acc)); border-radius:7px; transition:width .06s linear; }
@@ -127,6 +127,11 @@
                    color:var(--dim); font-size:clamp(14px, calc(2 * var(--u)), 26px); font-weight:700;
                    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .lk .opts span.on { background:var(--bank, var(--acc)); border-color:var(--bank, var(--acc)); color:#111; }
+  #touchbtn { min-height:44px; font-size:16px; padding:6px 14px; }
+  #touchbtn.on { background:var(--bank, var(--acc)); border-color:var(--bank, var(--acc)); color:#111; font-weight:700; }
+  body.touch .lk:not(.empty) { touch-action:none; cursor:ns-resize; user-select:none; -webkit-user-select:none; }
+  body.touch .lk .opts span { cursor:pointer; }
+  .lk.drag { border-color:var(--bank, var(--acc)); }
   .lk .pk { font-size:clamp(11px, calc(1.3 * var(--u)), 15px); font-weight:600; }
   .lk .pk.no2 { color:var(--learn); } .lk .pk.ok { color:#46a758; }
   .lk.empty { border-style:dashed; border-top-style:dashed; border-top-color:var(--line); background:transparent; }
@@ -149,7 +154,9 @@
   <div id="status">verbinde ...</div>
 </header>
 <section id="live">
-  <div id="livehead"><span id="livebank">Bank 1</span><div id="livebanks"></div></div>
+  <div id="livehead"><span id="livebank">Bank 1</span>
+    <button id="touchbtn" title="An: Kachel hoch/runter wischen ändert den Wert, Auswahl antippen, Doppeltipp = Standardwert">✋ Touch aus</button>
+    <div id="livebanks"></div></div>
   <div id="liveknobs"></div>
   <div id="livemsg" hidden>Kein Controller gefunden: die Live-Ansicht zeigt die Knob-Bänke, sobald ein MIDI-Controller da ist.</div>
 </section>
@@ -175,6 +182,9 @@
 <section class="card" id="ctrl" hidden>
   <h2>Controller-Knobs</h2>
   <div class="banks" id="banks"></div>
+  <div class="slots"><label for="bankname">Name der Bank:</label>
+    <input type="text" id="bankname" maxlength="24" size="18" placeholder="z.B. Filter, FX, Hüllkurve" autocomplete="off">
+    <span class="legend" style="margin:0">Enter oder woanders hintippen speichert</span></div>
   <div class="knobs" id="knobs"></div>
   <p class="legend"><b>Bank belegen:</b> Bank wählen (Pad = nächste Bank, oder oben anklicken), dann „L“ am Regler klicken
      und einen der 8 Knobs drehen. Rechtsklick auf „L“ entfernt die Belegung.<br>
@@ -240,7 +250,7 @@ function toNorm(p, v) {
 function fmt(p, v) {
   if (p.choices.length) return v;
   let s = Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(p.step ? 0 : 2);
-  if (p.unit === 'Hz' && v >= 1000) return (v / 1000).toFixed(2) + ' kHz';
+  if (p.unit === 'Hz' && v >= 1000) return (v / 1000).toFixed(v >= 10000 ? 1 : 2) + ' kHz';
   return s + (p.unit ? ' ' + p.unit : '');
 }
 
@@ -326,6 +336,8 @@ function buildCtrl() {
     x.classList.toggle('on', i === ctrl.bank); x.onclick = () => post('/api/ctrl/bank', {bank: i});
     bb.appendChild(x);
   });
+  const bn = $('#bankname');
+  if (document.activeElement !== bn || bn.dataset.bank !== String(ctrl.bank)) { bn.value = bank.name || ''; bn.dataset.bank = ctrl.bank; }
   const kb = $('#knobs'); kb.innerHTML = '';
   bank.params.forEach((pid, i) => {
     const d = document.createElement('div'); d.className = 'knob';
@@ -463,6 +475,7 @@ function buildLive() {
     (liveTiles[pid] = liveTiles[pid] || []).push({v: t.querySelector('.v'), bar: t.querySelector('.bar div'),
                                                   opts: t.querySelector('.opts'), tile: t});
     grid.appendChild(t);
+    liveTouch(t, p);
     refreshLive(pid, true);
   });
 }
@@ -479,11 +492,48 @@ function refreshLive(id, quiet) {
     }
   }
 }
+// Touch auf den Live-Kacheln (nur wenn "Touch" an ist, damit beim Spielen nichts aus Versehen verstellt wird)
+const touchOn = () => document.body.classList.contains('touch');
+function setLiveValue(p, v) { values[p.id] = v; refreshLive(p.id, true); refresh(p.id); sendParam(p.id, v); }
+function liveTouch(t, p) {
+  let lastTap = 0;
+  if (p.choices.length) {
+    for (const o of t.querySelectorAll('.opts span'))
+      o.onclick = () => { if (touchOn()) setLiveValue(p, o.dataset.v); };
+    return;
+  }
+  let drag = null;
+  t.onpointerdown = e => {
+    if (!touchOn()) return;
+    const now = performance.now();
+    if (now - lastTap < 300) { setLiveValue(p, p.default); lastTap = 0; return; }   // Doppeltipp = Standard
+    lastTap = now;
+    t.setPointerCapture(e.pointerId); t.classList.add('drag');
+    drag = {y: e.clientY, n: Math.max(0, Math.min(1, toNorm(p, values[p.id])))};
+  };
+  t.onpointermove = e => {
+    if (!drag) return;
+    const range = Math.max(200, t.clientHeight * 1.5);   // ganze Kachelhöhe ~ 2/3 des Bereichs
+    const n = Math.max(0, Math.min(1, drag.n + (drag.y - e.clientY) / range));
+    setLiveValue(p, fromNorm(p, n));
+  };
+  t.onpointerup = t.onpointercancel = () => { drag = null; t.classList.remove('drag'); };
+}
+function setTouch(on) {
+  document.body.classList.toggle('touch', on);
+  $('#touchbtn').classList.toggle('on', on);
+  $('#touchbtn').textContent = on ? '✋ Touch an' : '✋ Touch aus';
+  try { localStorage.setItem('pynthTouch', on ? '1' : ''); } catch (e) {}
+}
+$('#touchbtn').onclick = () => setTouch(!touchOn());
+try { setTouch(!!localStorage.getItem('pynthTouch')); } catch (e) { setTouch(false); }
 function setView(live) {
   document.body.classList.toggle('live', live);
   $('#viewbtn').textContent = live ? 'Detail-Ansicht' : 'Live-Ansicht';
   try { localStorage.setItem('pynthView', live ? 'live' : 'detail'); } catch (e) {}
 }
+$('#bankname').onchange = e => post('/api/ctrl/bankname', {bank: +e.target.dataset.bank, name: e.target.value});
+$('#bankname').onkeydown = e => { if (e.key === 'Enter') e.target.blur(); };
 $('#viewbtn').onclick = () => setView(!document.body.classList.contains('live'));
 try { setView(localStorage.getItem('pynthView') === 'live'); } catch (e) { setView(false); }
 

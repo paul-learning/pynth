@@ -208,6 +208,14 @@ class Controller:
             self._save()
             self._announce()
 
+    def set_bank_name(self, bank: int, name: str):
+        if 0 <= bank < N_PADS:
+            name = " ".join(str(name or "").split())[:24]
+            if name != self.config["banks"][bank]["name"]:
+                self.config["banks"][bank]["name"] = name
+                self._save()
+                self._announce()
+
     def set_modwheel(self, pid: str | None):
         if pid is None or pid in self.params.params:
             self.config["modwheel"]["param"] = pid

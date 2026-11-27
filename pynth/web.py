@@ -16,6 +16,7 @@ POST /api/ctrl/bank    {"bank": 0}                         aktive Knob-Bank (0-3
 POST /api/ctrl/learn   {"slot": "knob", "index": 0, "wizard": true}   (slot null = abbrechen)
 POST /api/ctrl/clear   {"slot": "pad", "index": 2}
 POST /api/ctrl/assign  {"bank": 1, "knob": 7, "id": "lfo.rate"}   (id null = leer)
+POST /api/ctrl/bankname{"bank": 1, "name": "Filter"}   (leer = kein Name)
 POST /api/ctrl/modwheel{"id": "lfo.depth"}
 POST /api/ctrl/takeover{"mode": "jump"}                    "jump" oder "pickup" (Soft-Takeover)
 GET  /api/wifi        WLAN-Status (Modus client/hotspot, Verbindung, IP)
@@ -176,6 +177,9 @@ def make_handler(app: App):
                     return self._json({"ok": True})
                 if path == "/api/ctrl/assign" and c:
                     c.assign(int(data["bank"]), int(data["knob"]), data.get("id") or None)
+                    return self._json({"ok": True})
+                if path == "/api/ctrl/bankname" and c:
+                    c.set_bank_name(int(data["bank"]), str(data.get("name") or ""))
                     return self._json({"ok": True})
                 if path == "/api/ctrl/modwheel" and c:
                     c.set_modwheel(data.get("id") or None)
