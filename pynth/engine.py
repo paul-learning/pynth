@@ -24,7 +24,6 @@ from . import dsp
 from .params import ParamStore
 
 MAX_VOICES = 8            # feste Polyphonie
-BEND_RANGE = 2.0          # Pitchbend +-2 Halbtoene
 VELOCITY_SENS = 0.6       # 0 = Anschlag egal, 1 = voll anschlagdynamisch
 # Pink-Noise-Filter (Paul Kellet, "economy"), Ausgang auf ~gleiche Lautheit wie White skaliert
 PINK_B = np.array([0.049922035, -0.095993537, 0.050612699, -0.004408786])
@@ -72,6 +71,7 @@ class Engine:
         self.voices = [Voice() for _ in range(MAX_VOICES)]
         self.events: queue.SimpleQueue = queue.SimpleQueue()
         self.bend = 0.0
+        self.bend_now = 0.0       # Pitchbend am Ende des letzten Blocks (fuer weichen Verlauf)
         self.pedal = False
         self.lfo_phase = 0.0
         self.filter_zi = np.zeros(2)
@@ -207,7 +207,7 @@ class Engine:
         """Alle aktiven Stimmen vektorisiert (eine numpy-Rechnung statt eine pro Stimme).
         Liefert (Summe Oszillatoren * Huellkurve, Summe der Huellkurven)."""
         sr = self.sr
-        semis = np.array([v.note - 69 for v in voices], dtype=np.float64) + self.bend * BEND_RANGE
+        semis = np.array([v.note - 69 for v in voices], dtype=np.float64)
         env = np.stack([self._env(v, p, n, ramp) for v in voices])
         osc = np.zeros((len(voices), n))
         for k, octave_key, extra in ((1, "osc1.octave", 0.0), (2, "osc2.octave", p["osc2.detune"] / 100.0)):
@@ -247,6 +247,12 @@ class Engine:
         if depth <= 0:
             target = "off"
         pitch_mod = 2.0 ** (lfo * depth * 2.0 / 12.0) if target == "pitch" else None
+        # Pitchbend: pro Sample von altem zu neuem Wert gleiten (kein Treppeneffekt)
+        b0, b1 = self.bend_now, self.bend
+        self.bend_now = b1
+        if b0 or b1:
+            bend = 2.0 ** ((b0 + (b1 - b0) * (ramp + 1.0) / n) * p["bend.range"] / 12.0)
+            pitch_mod = bend if pitch_mod is None else pitch_mod * bend
 
         # Stimmen. Noise wird nur einmal pro Block erzeugt und mit der Summe der
         # Huellkurven multipliziert (klingt gleich, kostet nur einen Bruchteil).

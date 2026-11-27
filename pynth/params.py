@@ -75,6 +75,7 @@ PARAMS: list[Param] = [
     *_osc(1, "saw", 0),
     *_osc(2, "square", 0),
     Param("osc2.detune", "Verstimmung", "osc2", -50, 50, 7, unit="ct"),
+    Param("bend.range", "Pitchbend", "osc2", 0, 12, 2, step=1, unit="HT"),
     Param("noise.type", "Farbe", "noise", default="white", choices=("white", "pink")),
 
     Param("mix.osc1", "Osc 1", "mix", 0, 1, 0.6),
