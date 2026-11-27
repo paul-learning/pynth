@@ -22,6 +22,8 @@ log = logging.getLogger("pynth.midi")
 IGNORE_PORTS = ("Midi Through", "RtMidi")
 SKIP_TYPES = ("clock", "active_sensing")
 CONTINUOUS = ("control_change", "pitchwheel", "aftertouch", "polytouch")   # im Monitor gedrosselt
+# MIDI Machine Control (Sysex F0 7F <id> 06 <cmd> F7), senden viele Transport-Tasten ab Werk
+MMC = {1: "stop", 2: "play", 3: "play", 6: "record", 9: "stop"}
 
 
 class MidiManager:
@@ -137,6 +139,11 @@ class MidiManager:
                     self.engine.note_on(msg.note, msg.velocity)
                 else:
                     self.engine.note_off(msg.note)
+            elif t == "sysex":
+                d = msg.data
+                if ctl and len(d) >= 4 and d[0] == 0x7F and d[2] == 0x06 and d[3] in MMC:
+                    self._show(f"MMC {MMC[d[3]].capitalize()} -> Looper")
+                    ctl.transport(MMC[d[3]])
             elif t == "program_change":
                 ch = msg.channel + 1
                 self._show(f"Program Change {msg.program} (Kanal {ch})")
