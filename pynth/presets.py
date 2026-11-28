@@ -8,15 +8,15 @@ Format (verschachtelt nach Gruppe, Schluessel = Teil nach dem Punkt):
   "noise":  {"type": "white"},
   "mix":    {"osc1": 0.5, "osc2": 0.3, "noise": 0.0},
   "env":    {"attack": 0.5, "decay": 1.0, "sustain": 0.7, "release": 2.0},
-  "filter": {"cutoff": 1000, "resonance": 0.5},
+  "filter": {"cutoff": 1000, "resonance": 0.5, "drive": 0.0, "env_amount": 0.3},
   "lfo":    {"wave": "sine", "target": "filter", "rate": 0.3, "depth": 0.2},
-  "fx":     {"delay_mix": 0.1, "delay_time": 0.35, "delay_feedback": 0.3,
-             "reverb_mix": 0.3, "reverb_size": 0.7},
+  "fx":     {"delay": 0.2, "delay_time": 0.35, "reverb_mix": 0.3, "reverb_size": 0.7},
   "master": {"volume": 0.7}
 }
 Fehlende Werte bekommen den Default, unbekannte werden ignoriert. Aeltere Formate
 werden beim Laden uebersetzt: das Mistral-Format ("type", "volume", "envelope",
-"effects") und Pynth 0.1 ("osc1.level" usw. -> "mix.osc1").
+"effects"), Pynth 0.1 ("osc1.level" usw. -> "mix.osc1") und das alte Delay
+("delay_mix" + "delay_feedback" -> ein Regler "delay").
 """
 from __future__ import annotations
 
@@ -24,11 +24,11 @@ import json
 import re
 from pathlib import Path
 
-from .params import PARAMS, RENAMED
+from .params import DROPPED, PARAMS, RENAMED, delay_from_mix
 from .storage import save_json
 
 _ALIASES = {"envelope": "env", "effects": "fx"}
-_KEY_ALIASES = {"type": "wave", "volume": "level", "reverb": "reverb_mix", "delay": "delay_mix"}
+_KEY_ALIASES = {"type": "wave", "volume": "level", "reverb": "reverb_mix"}
 
 
 def nest(flat: dict, name: str, preset: bool = False) -> dict:
@@ -47,17 +47,23 @@ def nest(flat: dict, name: str, preset: bool = False) -> dict:
 
 def flatten(data: dict) -> dict:
     flat = {}
-    for g, section in data.items():
+    for g0, section in data.items():
         if not isinstance(section, dict):
             continue
-        g = _ALIASES.get(g, g)
+        g = _ALIASES.get(g0, g0)
         for k, v in section.items():
+            if g0 == "effects" and k == "delay":
+                k = "delay_mix"                     # Mistral-Format: "delay" war der Mix
             if g == "master" and k == "volume":
                 flat["master.volume"] = v
                 continue
             if g == "noise" and k == "type" and v not in ("white", "pink"):
                 continue
             pid = f"{g}.{_KEY_ALIASES.get(k, k) if g != 'noise' else k}"
+            if pid in DROPPED:
+                continue
+            if pid == "fx.delay_mix" and isinstance(v, (int, float)):
+                v = delay_from_mix(v)               # altes Delay: Mix -> ein Regler
             flat[RENAMED.get(pid, pid)] = v
     return flat
 

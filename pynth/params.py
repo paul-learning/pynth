@@ -93,15 +93,17 @@ PARAMS: list[Param] = [
     Param("filter.cutoff", "Cutoff", "filter", 40, 18000, 2500, curve="exp", unit="Hz"),
     Param("filter.resonance", "Resonanz", "filter", 0, 1, 0.2),
     Param("filter.drive", "Drive", "filter", 0, 1, 0.0),
+    # Filter-Huellkurve: die Amp-ADSR (env.*) bewegt auch den Cutoff, -1..+1 = -4..+4 Oktaven
+    Param("filter.env_amount", "Env Amount", "filter", -1, 1, 0.0),
 
     Param("lfo.wave", "Wellenform", "lfo", default="sine", choices=("sine", "triangle", "square", "saw")),
     Param("lfo.target", "Ziel", "lfo", default="filter", choices=("off", "filter", "pitch", "volume")),
     Param("lfo.rate", "Rate", "lfo", 0.05, 20, 2.0, curve="exp", unit="Hz"),
     Param("lfo.depth", "Tiefe", "lfo", 0, 1, 0.0),
 
-    Param("fx.delay_mix", "Delay Mix", "fx", 0, 1, 0.0),
+    # Ein Regler fuer Mix und Feedback zusammen (siehe delay_mix_feedback)
+    Param("fx.delay", "Delay", "fx", 0, 1, 0.0),
     Param("fx.delay_time", "Delay Zeit", "fx", 0.05, 1.5, 0.35, curve="exp", unit="s"),
-    Param("fx.delay_feedback", "Delay Feedback", "fx", 0, 0.9, 0.35),
     Param("fx.reverb_mix", "Hall Mix", "fx", 0, 1, 0.15),
     Param("fx.reverb_size", "Hall Größe", "fx", 0, 1, 0.6),
 
@@ -111,7 +113,23 @@ PARAMS: list[Param] = [
 ]
 
 # Umbenannte Parameter (alte ID -> neue ID). Gilt fuer Presets, state.json und midi_map.json.
-RENAMED = {"osc1.level": "mix.osc1", "osc2.level": "mix.osc2", "noise.level": "mix.noise"}
+RENAMED = {"osc1.level": "mix.osc1", "osc2.level": "mix.osc2", "noise.level": "mix.noise",
+           "fx.delay_mix": "fx.delay"}
+# Entfallene Parameter: werden beim Laden still ignoriert (in fx.delay aufgegangen)
+DROPPED = {"fx.delay_feedback"}
+
+DELAY_MIX_MAX = 0.6                       # fx.delay 1 -> Mix 0.6
+DELAY_FB_MIN, DELAY_FB_MAX = 0.15, 0.85   # bleibt unter der Selbstoszillation
+
+
+def delay_mix_feedback(x: float) -> tuple[float, float]:
+    """fx.delay 0..1 -> (Mix, Feedback). 0 = kein Echo, 1 = viel, langes Echo."""
+    return DELAY_MIX_MAX * x, DELAY_FB_MIN + (DELAY_FB_MAX - DELAY_FB_MIN) * x
+
+
+def delay_from_mix(mix: float) -> float:
+    """Alter Wert fx.delay_mix -> fx.delay (gleich lautes Echo wie vorher)."""
+    return max(0.0, min(1.0, float(mix) / DELAY_MIX_MAX))
 
 GROUP_LABELS = {
     "osc1": "Oszillator 1", "osc2": "Oszillator 2", "noise": "Noise", "mix": "Mix",

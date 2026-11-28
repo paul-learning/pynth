@@ -53,11 +53,13 @@ static inline double osc(int w, double t, double dt)
  * phases: 2 pro Stimme (Osc 1, Osc 2), werden fortgeschrieben.
  * pmod: Tonhoehen-Faktor pro Sample oder NULL.
  * mix/envsum werden aufaddiert (vorher nullen).
+ * envmax: groesster Huellkurvenwert (ohne Velocity) ueber alle Stimmen, pro
+ * Sample, fuer die Filter-Huellkurve, oder NULL. Vorher nullen.
  */
 #define NVP 16
 
 void render_voices(int nv, int n, const double *vp, double *phases,
-                   const double *pmod, double *mix, double *envsum)
+                   const double *pmod, double *mix, double *envsum, double *envmax)
 {
     for (int v = 0; v < nv; v++) {
         const double *q = vp + v * NVP;
@@ -92,6 +94,7 @@ void render_voices(int nv, int n, const double *vp, double *phases,
                     dec *= dmul;
                 }
             }
+            if (envmax && env > envmax[i]) envmax[i] = env;
             env *= vel;
 
             double pm = pmod ? pmod[i] : 1.0;

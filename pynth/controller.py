@@ -13,6 +13,7 @@ controller.json (Nutzerdaten, nicht im Repo). Fehlt die Datei, gelten die Defaul
 from __future__ import annotations
 
 import copy
+from .params import RENAMED
 from .storage import load_json, save_json
 import logging
 import time
@@ -102,6 +103,7 @@ class Controller:
                 if not isinstance(b, dict):
                     continue
                 ps = list(b.get("params") or [])[:N_KNOBS]
+                ps = [RENAMED.get(p, p) if isinstance(p, str) else p for p in ps]   # alte IDs
                 ps = [p if p in self.params.params else None for p in ps]
                 ps += [None] * (N_KNOBS - len(ps))
                 cfg["banks"][i] = {"name": str(b.get("name") or ""), "params": ps}

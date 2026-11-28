@@ -113,10 +113,11 @@ def midi_monitor():
 
 def bench(args):
     params = ParamStore()
-    params.set("fx.delay_mix", 0.3)
+    params.set("fx.delay", 0.5)
     params.set("fx.reverb_mix", 0.3)
     params.set("lfo.depth", 0.5)
     params.set("lfo.target", "filter")
+    params.set("filter.env_amount", 0.5)        # Filter-Huellkurve mitmessen
     params.set("env.release", 10.0)            # Stimmen bleiben die ganze Messung ueber aktiv
     eng = Engine(params, args.samplerate)
     print(f"DSP-Kern: {'C (schnell)' if fast.lib else 'numpy (C-Kern nicht verfuegbar)'}")

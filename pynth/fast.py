@@ -65,7 +65,7 @@ def _load():
         except OSError as e:
             log.info("C-Kern %s nicht nutzbar: %s", so, e)
             continue
-        lib.render_voices.argtypes = [_I, _I, _P, _P, _P, _P, _P]
+        lib.render_voices.argtypes = [_I, _I, _P, _P, _P, _P, _P, _P]
         lib.render_voices.restype = None
         lib.svf_lowpass.argtypes = [_I, _P, _P, _P, _D, _D, _P]
         lib.svf_lowpass.restype = None
