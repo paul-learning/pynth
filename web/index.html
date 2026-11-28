@@ -115,7 +115,8 @@
   #loopmini.dub #lmtxt, #loopmini.rec #lmtxt { color:#ff8a8d; }
   #loopmini.play #lmtxt { color:#7fd18a; }
   .badge { font-size:10px; color:#111; background:var(--bank, var(--acc)); border-radius:3px; padding:0 4px; margin-left:4px; }
-  #wifi { margin:0 14px 12px; }
+  #setupcards { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:12px; padding:0 14px 20px; align-items:start; }
+  #wifi, #sys { margin:0; }
   #wifi summary { cursor:pointer; list-style:none; display:flex; gap:10px; align-items:baseline; }
   #wifi summary h2 { margin:0; }
   #wifisum { color:var(--dim); font-size:12px; }
@@ -124,7 +125,6 @@
   #wifilist button.sel { border-color:var(--acc); }
   #wifilist small { color:var(--dim); }
   #wifimsg.err { color:var(--learn); } #wifimsg.ok { color:#46a758; }
-  #sys { margin:0 14px 12px; }
   #sys summary { cursor:pointer; list-style:none; display:flex; gap:10px; align-items:baseline; }
   #sys summary h2 { margin:0; }
   #sysmsg.err { color:var(--learn); }
@@ -136,7 +136,6 @@
             max-height:240px; overflow:auto; font-size:12px; white-space:pre-wrap; user-select:text; }
   #updlog:empty { display:none; }
   #updlog.err { border-color:var(--learn); }
-  body.live #sys { display:none; }
 
   /* --- Live-Ansicht: nur die 8 Knobs der aktiven Bank, groß fürs Tablet --- */
   #viewbtn { font-weight:700; }
@@ -144,7 +143,7 @@
   @media (orientation:portrait) { :root { --u:min(2vw, 1vh); } }
   #live { display:none; }
   body.live #live { display:flex; }
-  body.live #midiinfo, body.live #looper, body.live #ctrl, body.live #wifi, body.live #groups, body.live #kbwrap,
+  body.live #midiinfo, body.live #looper, body.live #ctrl, body.live #setupcards, body.live #groups, body.live #kbwrap,
   body.live #presets, body.live #pname, body.live #save, body.live #del, body.live #status, body.live #bankpill { display:none; }
   body.live header { flex-wrap:nowrap; }
   body.live #viewbtn { margin-left:auto; }
@@ -269,6 +268,17 @@
       <option value="pickup">erst abholen (Soft-Takeover, nichts springt)</option></select></div>
   </details>
 </section>
+<div id="sysoverlay" hidden></div>
+<main id="groups"></main>
+<div id="kbwrap">
+  <div id="kbbar">
+    <button id="octdn">Okt -</button><span id="octlbl"></span><button id="octup">Okt +</button>
+    <span>Tastatur: A W S E D F T G Z H U J K O L</span>
+  </div>
+  <div id="kb"></div>
+</div>
+<!-- Selten gebraucht: Einstellungen ganz unten, eingeklappt -->
+<div id="setupcards">
 <details class="card" id="wifi">
   <summary><h2>WLAN</h2><span id="wifisum">...</span></summary>
   <p id="wifistate"></p>
@@ -302,14 +312,7 @@
     <input type="password" id="updpin" placeholder="PIN" size="8" inputmode="numeric" autocomplete="off">
     <button id="updgo" type="submit">Update holen + neu starten</button></form>
   <pre id="updlog"></pre>
-<div id="sysoverlay" hidden></div>
-<main id="groups"></main>
-<div id="kbwrap">
-  <div id="kbbar">
-    <button id="octdn">Okt -</button><span id="octlbl"></span><button id="octup">Okt +</button>
-    <span>Tastatur: A W S E D F T G Z H U J K O L</span>
-  </div>
-  <div id="kb"></div>
+</details>
 </div>
 <script>
 const $ = s => document.querySelector(s);
@@ -882,7 +885,10 @@ $('#updform').onsubmit = async e => {
   if (!r.ok) { m.className = 'err'; m.textContent = r.error; $('#updgo').disabled = false; }
 };
 const loadSys = () => fetch('/api/system').then(r => r.json()).then(setSys).catch(() => {});
-$('#sys').addEventListener('toggle', () => { if ($('#sys').open) loadSys(); });
+$('#sys').addEventListener('toggle', () => {
+  try { sessionStorage.setItem('sysOpen', $('#sys').open ? '1' : ''); } catch (e) {}
+  if ($('#sys').open) loadSys(); });
+try { if (sessionStorage.getItem('sysOpen')) $('#sys').open = true; } catch (e) {}   // nach Neuladen offen lassen
 async function sysPower(cmd, question) {
   if (!confirm(question)) return;
   const m = $('#sysmsg'); m.className = ''; m.textContent = '...';
