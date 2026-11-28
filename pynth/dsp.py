@@ -10,6 +10,23 @@ from . import fast
 TWO_PI = 2.0 * math.pi
 
 
+def lfilter(b, a, x, zi):
+    """Wie scipy.signal.lfilter(b, a, x, zi=zi) -> (y, zf), a[0] = 1.
+    Mit C-Kern ohne scipy (scipy zu laden kostet auf dem Pi beim Start Sekunden),
+    sonst wird scipy erst beim ersten Aufruf geladen."""
+    if fast.lib is None:
+        from scipy.signal import lfilter as sp_lfilter
+        return sp_lfilter(b, a, x, zi=zi)
+    m = max(len(a), len(b)) - 1
+    bb, aa = np.zeros(m + 1), np.zeros(m + 1)
+    bb[:len(b)], aa[:len(a)] = b, a
+    x = np.ascontiguousarray(x, dtype=np.float64)
+    z = np.array(zi, dtype=np.float64)
+    y = np.empty_like(x)
+    fast.lib.iir_filter(len(x), fast.ptr(x), fast.ptr(y), fast.ptr(bb), fast.ptr(aa), m, fast.ptr(z))
+    return y, z
+
+
 def _polyblep(t: np.ndarray, dt) -> np.ndarray:
     """Band-limitierte Korrektur an Sprungstellen (gegen Aliasing bei Saw/Square)."""
     dt = np.broadcast_to(dt, t.shape)
@@ -119,7 +136,6 @@ class Reverb:
         self.damp_state = 0.0
 
     def process(self, x: np.ndarray, size: float) -> np.ndarray:
-        from scipy.signal import lfilter
         g = 0.70 + 0.27 * size
         # sanfte Hoehendaempfung am Eingang (One-Pole), haelt den Hall weich
         y, zf = lfilter([0.4], [1.0, -0.6], x, zi=[self.damp_state])

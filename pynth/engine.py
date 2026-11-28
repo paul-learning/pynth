@@ -18,9 +18,9 @@ import queue
 import time
 
 import numpy as np
-from scipy.signal import lfilter
 
 from . import dsp, fast
+from .dsp import lfilter
 from .looper import Looper
 from .params import ParamStore
 

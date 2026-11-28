@@ -5,7 +5,9 @@
 # Nach Aenderungen an dieser Datei: erneut kopieren + daemon-reload + restart.
 [Unit]
 Description=Pynth Synthesizer
-After=network-online.target sound.target bluetooth.target
+# Nicht aufs WLAN warten: Audio + MIDI brauchen kein Netz, die Web-UI ist erreichbar,
+# sobald das WLAN da ist. MIDI-Geraete (auch Bluetooth) sucht pynth alle 3 s selbst.
+After=sound.target
 
 [Service]
 User=pynth
@@ -14,6 +16,9 @@ WorkingDirectory=/home/pynth/pynth
 # CPU immer auf vollem Takt: sonst taktet der Pi bei wenig Last runter und braucht
 # beim naechsten Akkord ein paar ms zum Hochfahren -> Knackser. Laeuft als root (+).
 ExecStartPre=+/bin/sh -c 'for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo performance > "$g"; done || true'
+# Status-LED (ACT): schnell blinken, solange pynth startet, und trigger/brightness fuer
+# die Gruppe audio freigeben, damit pynth "spielbereit" anzeigen kann (pynth/leds.py).
+ExecStartPre=+/bin/sh -c 'for d in /sys/class/leds/ACT /sys/class/leds/led0; do [ -w "$$d/trigger" ] || continue; echo timer > "$$d/trigger"; echo 100 > "$$d/delay_on"; echo 100 > "$$d/delay_off"; chgrp audio "$$d/trigger" "$$d/brightness"; chmod g+w "$$d/trigger" "$$d/brightness"; break; done; true'
 ExecStart=/home/pynth/pynth_venv/bin/python -m pynth --blocksize 512
 Restart=on-failure
 RestartSec=3

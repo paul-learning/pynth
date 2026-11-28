@@ -192,3 +192,21 @@ void ladder_lowpass(int n, const double *x, double *y, const double *cutoff,
         s1 = s2 = s3 = s4 = 0.0;
     state[0] = s1; state[1] = s2; state[2] = s3; state[3] = s4;
 }
+
+/* Allgemeiner IIR-Filter wie scipy.signal.lfilter (Direktform II transponiert),
+ * a[0] muss 1 sein. b und a haben beide m+1 Koeffizienten, z hat m Werte (in/out).
+ * Ersetzt scipy fuer Pink-Noise, LFO-Glaettung und Hall-Daempfung, damit pynth
+ * scipy beim Start nicht laden muss. */
+void iir_filter(int n, const double *x, double *y, const double *b, const double *a,
+                int m, double *z)
+{
+    for (int i = 0; i < n; i++) {
+        double xi = x[i];
+        double yi = b[0] * xi + (m > 0 ? z[0] : 0.0);
+        for (int k = 0; k < m - 1; k++)
+            z[k] = b[k + 1] * xi + z[k + 1] - a[k + 1] * yi;
+        if (m > 0)
+            z[m - 1] = b[m] * xi - a[m] * yi;
+        y[i] = yi;
+    }
+}
