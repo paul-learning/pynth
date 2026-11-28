@@ -27,6 +27,9 @@ POST /api/wifi/connect{"ssid": "MeinWLAN", "password": "..."}  verbindet im Hint
 POST /api/wifi/hotspot                                    Hotspot jetzt starten
 POST /api/wifi/known                                      Hotspot aus, bekanntes WLAN suchen (sonst Hotspot wieder an)
 POST /api/wifi/rescan                                     WLAN-Liste neu (im Hotspot ca. 20 s weg)
+GET  /api/system      {"setup": true, "busy": null}       Ausschalten/Neustart eingerichtet?
+POST /api/system/poweroff                                 Zustand sichern, Pi ausschalten
+POST /api/system/reboot                                   Zustand sichern, Pi neu starten
 """
 from __future__ import annotations
 
@@ -51,13 +54,21 @@ STATIC = {
 
 
 class App:
-    def __init__(self, params, engine, presets, midi, web_dir: Path, audio_info: dict, controller=None):
+    def __init__(self, params, engine, presets, midi, web_dir: Path, audio_info: dict, controller=None,
+                 save_state=None):
         self.params, self.engine, self.presets, self.midi = params, engine, presets, midi
         self.controller = controller
         self.web_dir = Path(web_dir)
         self.audio_info = audio_info
         from .wifi import Wifi
         self.wifi = Wifi(on_change=lambda st: params.broadcast("wifi", st))
+        from .system import System
+
+        def before_shutdown():
+            engine.panic()
+            if save_state:
+                save_state()
+        self.system = System(params.broadcast, before_shutdown)
 
     def state(self) -> dict:
         return {
@@ -117,6 +128,8 @@ def make_handler(app: App):
                 self._json(app.state())
             elif self.path == "/api/wifi":
                 self._json(app.wifi.status())
+            elif self.path == "/api/system":
+                self._json(app.system.status())
             elif self.path == "/api/events":
                 self._sse()
             else:
@@ -219,6 +232,8 @@ def make_handler(app: App):
                     return self._json({"ok": app.wifi.known()})
                 if path == "/api/wifi/rescan":
                     return self._json({"ok": app.wifi.rescan()})
+                if path in ("/api/system/poweroff", "/api/system/reboot"):
+                    return self._json(app.system.power(path.rsplit("/", 1)[1]))
                 if path == "/api/looper":
                     cmd = str(data.get("cmd"))
                     if cmd not in ("record", "stop", "play", "clear"):

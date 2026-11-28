@@ -1,0 +1,3 @@
+# Die Web-UI (Benutzer pynth) darf den Pi ausschalten und neu starten, sonst nichts.
+# Eingerichtet von deploy/install-system.sh
+pynth ALL=(root) NOPASSWD: /usr/bin/systemctl --no-block poweroff, /usr/bin/systemctl --no-block reboot

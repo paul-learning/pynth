@@ -265,6 +265,25 @@ Update `deploy/pynth-wifi`, das Installationsskript einfach erneut ausführen.
   oder Tastatur/Bildschirm am Pi. Gespeicherte WLANs: `nmcli con show`, WLAN neu verbinden:
   `sudo nmcli dev wifi connect "<SSID>" password "<Passwort>"`.
 
+## Ausschalten und Neustart aus der Web-UI
+
+In der Detail-Ansicht unter **System**: „⏻ Ausschalten“ sichert den aktuellen Sound, schaltet alle
+Noten aus und fährt den Pi sauber herunter (statt Stecker ziehen, schont die SD-Karte). Wenn die
+grüne LED aus ist (ca. 20 s), Stecker ziehen. „Pi neu starten“ geht genauso, die Seite lädt danach
+von selbst neu.
+
+Einmal am Pi einrichten (als `pi`, auch nach Updates, die `deploy/pynth.service` ändern):
+
+```bash
+sudo bash /home/pynth/pynth/deploy/install-system.sh
+sudo systemctl restart pynth
+```
+
+Das Skript kopiert die Dienst-Datei und legt eine sudo-Regel an, die dem Benutzer `pynth` genau
+`systemctl --no-block poweroff` und `... reboot` erlaubt, sonst nichts
+(`deploy/pynth-system.sudoers`). Rückgängig: `... install-system.sh --uninstall`.
+Achtung: Jeder im selben WLAN (oder im Hotspot) kann den Knopf drücken, es gibt keine Anmeldung.
+
 ## Looper (Record / Stop / Play)
 
 Der Looper nimmt auf, **was** du spielst (Noten, Anschlag, Sustain-Pedal), nicht den Klang.
@@ -302,6 +321,7 @@ pynth/controller.py Knob-Bänke, Pads, Soft-Takeover, Mod-Rad, Looper-Tasten
 pynth/looper.py   MIDI-Looper (Aufnahme, Wiedergabe, Overdub)
 pynth/web.py      HTTP-API + SSE
 pynth/leds.py     Status-LED (startet / spielbereit / Fehler)
+pynth/system.py   Ausschalten / Neustart (sudo-Regel: deploy/install-system.sh)
 pynth/wifi.py     WLAN-Status, Scan, Verbinden (für die Web-UI)
 deploy/pynth-wifi Fallback-Hotspot + WLAN-Wechsel (root), install-wifi.sh richtet alles ein
 pynth/presets.py  Preset-Format (JSON)
