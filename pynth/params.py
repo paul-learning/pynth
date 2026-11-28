@@ -107,16 +107,27 @@ PARAMS: list[Param] = [
     Param("fx.reverb_mix", "Hall Mix", "fx", 0, 1, 0.15),
     Param("fx.reverb_size", "Hall Größe", "fx", 0, 1, 0.6),
 
-    # Tempo der Looper-Wiedergabe (Noten kommen schneller/langsamer, Tonhoehe bleibt)
-    Param("looper.speed", "Tempo", "looper", 0.25, 5.0, 1.0, curve="exp", unit="×", preset=False,
-          limits=(0.1, 10.0)),
+    # Looper (nicht Teil des Klangs: Preset laden laesst die Werte stehen)
+    # BPM: Bereich in der Web-UI einstellbar (z.B. 60-180 fuer feine Schritte am Knob)
+    Param("looper.bpm", "BPM", "looper", 60, 180, 120, step=1, unit="BPM", preset=False,
+          limits=(30, 300)),
+    Param("looper.bars", "Takte", "looper", 1, 32, 4, step=1, preset=False),
+    # Stufenregler: links = aus, dann Viertel, Achtel, Sechzehntel
+    Param("looper.quantize", "Quantisierung", "looper", default="aus",
+          choices=("aus", "1/4", "1/8", "1/16"), preset=False),
+    Param("looper.click", "Click", "looper", default="aus", choices=("aus", "an"), preset=False),
+    Param("looper.click_level", "Click Lautst.", "looper", 0, 1, 0.5, preset=False),
 ]
 
 # Umbenannte Parameter (alte ID -> neue ID). Gilt fuer Presets, state.json und midi_map.json.
 RENAMED = {"osc1.level": "mix.osc1", "osc2.level": "mix.osc2", "noise.level": "mix.noise",
            "fx.delay_mix": "fx.delay"}
-# Entfallene Parameter: werden beim Laden still ignoriert (in fx.delay aufgegangen)
-DROPPED = {"fx.delay_feedback"}
+# Entfallene Parameter: werden beim Laden still ignoriert (fx.delay_feedback ist in fx.delay
+# aufgegangen, looper.speed wurde looper.bpm)
+DROPPED = {"fx.delay_feedback", "looper.speed"}
+# Nur fuer Knob-/CC-Belegungen (controller.json, midi_map.json): der Tempo-Knob bleibt Tempo-Knob.
+# Werte werden nicht uebernommen (x-fach ist etwas anderes als BPM).
+RENAMED_CONTROLS = {**RENAMED, "looper.speed": "looper.bpm"}
 
 DELAY_MIX_MAX = 0.6                       # fx.delay 1 -> Mix 0.6
 DELAY_FB_MIN, DELAY_FB_MAX = 0.15, 0.85   # bleibt unter der Selbstoszillation
@@ -169,7 +180,7 @@ class ParamStore:
     def load_flat(self, flat: dict, name: str | None = None):
         for pid, p in self.params.items():
             if not p.preset and pid not in flat:
-                continue                    # z.B. Looper-Tempo: Preset-Wechsel aendert es nicht
+                continue                    # z.B. Looper-BPM: Preset-Wechsel aendert es nicht
             self.values[pid] = p.clamp(flat.get(pid, p.default))
         if name:
             self.preset_name = name
@@ -179,7 +190,7 @@ class ParamStore:
     def schema(self) -> list[dict]:
         return [asdict(self.params[p.id]) for p in PARAMS]
 
-    # --- einstellbarer Bereich (z.B. Looper-Tempo) ----------------------
+    # --- einstellbarer Bereich (z.B. Looper-BPM) ----------------------
     def set_range(self, pid: str, lo: float, hi: float) -> bool:
         p = self.params.get(pid)
         if p is None or not p.limits:
