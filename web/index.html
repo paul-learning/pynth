@@ -132,6 +132,10 @@
   #sysoverlay { position:fixed; inset:0; z-index:50; display:grid; place-items:center; padding:24px;
                 background:rgba(10,11,13,.94); color:var(--fg); font-size:20px; text-align:center; line-height:1.5; }
   #sysoverlay[hidden] { display:none; }
+  #updlog { background:#0e1013; border:1px solid var(--line); border-radius:6px; padding:6px 8px; margin:8px 0 0;
+            max-height:240px; overflow:auto; font-size:12px; white-space:pre-wrap; user-select:text; }
+  #updlog:empty { display:none; }
+  #updlog.err { border-color:var(--learn); }
   body.live #sys { display:none; }
 
   /* --- Live-Ansicht: nur die 8 Knobs der aktiven Bank, groß fürs Tablet --- */
@@ -284,13 +288,20 @@
      Klappt es nicht (z.B. falsches Passwort), kommt der Hotspot nach ca. 1–2 Minuten zurück.</p>
 </details>
 <details class="card" id="sys">
-  <summary><h2>System</h2><span id="syssum" class="legend" style="margin:0">Ausschalten, Neustart</span></summary>
+  <summary><h2>System</h2><span id="syssum" class="legend" style="margin:0">Ausschalten, Neustart, Update</span></summary>
   <p id="sysstate" class="legend"></p>
   <div class="slots">
     <button id="sysoff" title="Zustand sichern und den Pi sauber herunterfahren (statt Stecker ziehen)">⏻ Ausschalten</button>
     <button id="sysreboot" title="Zustand sichern und den Pi neu starten">Pi neu starten</button></div>
   <p id="sysmsg"></p>
-</details>
+  <h2 style="margin-top:14px">Update</h2>
+  <p class="legend" style="margin-top:0">Holt die neueste Fassung von GitHub (git pull) und startet Pynth neu.
+     Braucht Internet am Pi. Die PIN wird am Pi gesetzt (<code>install-system.sh --pin</code>).</p>
+  <p id="updstate" class="legend"></p>
+  <form class="slots" id="updform" autocomplete="off">
+    <input type="password" id="updpin" placeholder="PIN" size="8" inputmode="numeric" autocomplete="off">
+    <button id="updgo" type="submit">Update holen + neu starten</button></form>
+  <pre id="updlog"></pre>
 <div id="sysoverlay" hidden></div>
 <main id="groups"></main>
 <div id="kbwrap">
@@ -726,6 +737,7 @@ async function init() {
   es.addEventListener('status', e => setStatus(JSON.parse(e.data)));
   es.addEventListener('wifi', e => setWifi(JSON.parse(e.data)));
   es.addEventListener('system', e => showSystem(JSON.parse(e.data)));
+  es.addEventListener('update', e => showUpdate(JSON.parse(e.data)));
   let lost = false;
   es.onerror = () => { lost = true; $('#status').textContent = 'Verbindung weg - versuche neu ...'; };
   es.onopen = () => { if (lost) location.reload(); };   // z.B. nach Neustart/Update: alles frisch laden
@@ -842,11 +854,33 @@ loadWifi();
 function showSystem(d) {
   const o = $('#sysoverlay'); o.hidden = false; o.textContent = d.msg;
 }
+const SETUP_CMD = '<code>sudo bash /home/pynth/pynth/deploy/install-system.sh</code>';
 function setSys(st) {
-  $('#sysstate').innerHTML = st.setup ? ''
-    : 'Noch nicht eingerichtet, einmal am Pi ausführen: <code>sudo bash /home/pynth/pynth/deploy/install-system.sh</code>';
+  $('#sysstate').innerHTML = st.setup ? '' : 'Noch nicht eingerichtet, einmal am Pi ausführen: ' + SETUP_CMD;
   $('#sysoff').disabled = $('#sysreboot').disabled = !st.setup || !!st.busy;
+  const u = st.update_setup || {}, miss = [];
+  if (!u.git) miss.push('kein Git-Checkout');
+  if (!u.restart) miss.push('Neustart-Regel fehlt');
+  if (!u.pin) miss.push('keine PIN gesetzt');
+  $('#updstate').innerHTML = miss.length ? `Noch nicht bereit (${miss.join(', ')}). Einmal am Pi ausführen: ${SETUP_CMD}` : '';
+  $('#updgo').disabled = !!miss.length || !!st.busy;
+  if (st.update_log && st.update_log.length && !$('#updlog').textContent) $('#updlog').textContent = st.update_log.join('\n');
 }
+function showUpdate(d) {
+  const l = $('#updlog');
+  l.textContent = d.log.join('\n'); l.className = d.state === 'error' ? 'err' : ''; l.scrollTop = l.scrollHeight;
+  $('#updgo').disabled = d.state === 'running' || d.state === 'restarting';
+  if (d.state === 'restarting') $('#status').textContent = 'Pynth startet neu ...';
+}
+$('#updform').onsubmit = async e => {
+  e.preventDefault();
+  const pin = $('#updpin').value, m = $('#updlog');
+  if (!pin) { $('#updpin').focus(); return; }
+  $('#updgo').disabled = true; m.className = ''; m.textContent = 'prüfe PIN ...';
+  const r = await post('/api/system/update', {pin}).catch(() => ({ok: false, error: 'keine Verbindung'}));
+  $('#updpin').value = '';
+  if (!r.ok) { m.className = 'err'; m.textContent = r.error; $('#updgo').disabled = false; }
+};
 const loadSys = () => fetch('/api/system').then(r => r.json()).then(setSys).catch(() => {});
 $('#sys').addEventListener('toggle', () => { if ($('#sys').open) loadSys(); });
 async function sysPower(cmd, question) {
