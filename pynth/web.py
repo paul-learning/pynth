@@ -1,6 +1,7 @@
 """Mini-Webserver nur mit der Python-Standardbibliothek (keine Extra-Pakete).
 
 GET  /                 -> Web-UI
+GET  /manifest.webmanifest, /icon-192.png, ...  -> Web-App-Manifest + Icons (Home-Bildschirm)
 GET  /api/state        -> Schema, Werte, Presets, MIDI-Status
 GET  /api/events       -> Server-Sent Events (Live-Updates, z.B. wenn ein MIDI-Knopf dreht)
 POST /api/param        {"id": "filter.cutoff", "value": 1200}  oder  {"id":..., "norm": 0.5}
@@ -39,6 +40,14 @@ from pathlib import Path
 from .params import GROUP_LABELS
 
 log = logging.getLogger("pynth.web")
+
+# Weitere Dateien aus web/ (feste Liste, keine beliebigen Pfade)
+STATIC = {
+    "/manifest.webmanifest": "application/manifest+json",
+    "/icon-192.png": "image/png",
+    "/icon-512.png": "image/png",
+    "/apple-touch-icon.png": "image/png",
+}
 
 
 class App:
@@ -90,6 +99,17 @@ def make_handler(app: App):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Cache-Control", "no-cache")      # nach Update immer die neue UI
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            elif self.path in STATIC:
+                try:
+                    body = (app.web_dir / self.path.lstrip("/")).read_bytes()
+                except OSError:
+                    return self._json({"error": "not found"}, 404)
+                self.send_response(200)
+                self.send_header("Content-Type", STATIC[self.path])
+                self.send_header("Cache-Control", "max-age=86400")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
