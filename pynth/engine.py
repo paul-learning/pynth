@@ -4,8 +4,10 @@ Ablauf pro Audio-Block (z.B. 8192 Samples):
   1. Note-/Bend-Events aus der Queue abarbeiten (thread-sicher)
   2. LFO fuer den ganzen Block berechnen
   3. Jede aktive Stimme: 2 Oszillatoren (+ Rauschen) * ADSR * Velocity
-  4. Summe durch den Tiefpass (Biquad, in 256er-Teilbloecken, damit Cutoff-
-     Aenderungen und LFO weich laufen)
+  4. Summe durch den Tiefpass (Ladder im C-Kern, Cutoff pro Sample; sonst Biquad
+     in Teilbloecken). Cutoff-Modulation: LFO und Filter-Huellkurve. Das Filter
+     ist eins fuer alle Stimmen, darum folgt es der hoechsten Stimmen-Huellkurve
+     (paraphon: jeder neue Anschlag oeffnet es wieder).
   5. Master-Lautstaerke (gerampt), Delay, Hall, Soft-Clip
 
 Alle Phasen (Oszillatoren, LFO) laufen ueber Blockgrenzen weiter, Filter und
@@ -22,7 +24,7 @@ import numpy as np
 from . import dsp, fast
 from .dsp import lfilter
 from .looper import Looper
-from .params import ParamStore
+from .params import ParamStore, delay_mix_feedback
 
 MAX_VOICES = 8            # feste Polyphonie
 VELOCITY_SENS = 0.6       # 0 = Anschlag egal, 1 = voll anschlagdynamisch
@@ -39,6 +41,7 @@ DRIVE_DB = 24.0           # Drive 1 = +24 dB in die Saettigung
 DRIVE_MAKEUP = 0.55       # davon wird ein Teil am Ausgang wieder abgezogen
 LADDER_GAIN = 1.3         # 24 dB/Okt. nimmt mehr Obertoene weg: Pegel wie beim alten Filter
 HEADROOM = 0.25           # Pegel pro Stimme vor dem Filter; 8 Stimmen bleiben unter dem Limiter
+FENV_OCT = 4.0            # filter.env_amount +-1 = +-4 Oktaven
 EXP_K = 6.9   # exp(-6.9) ~ -60 dB: Decay/Release sind "fertig" nach der eingestellten Zeit
 
 
@@ -89,6 +92,7 @@ class Engine:
         self.lfo_smooth = (np.array([1.0 - c]), np.array([1.0, -c]))
         self.cutoff_now: float | None = None
         self.volume_now: float | None = None
+        self.env_amount_now = 0.0
         self.delay = dsp.FeedbackLine(int(1.6 * samplerate))
         self.reverb = dsp.Reverb(samplerate)
         self.rng = np.random.default_rng()
@@ -238,7 +242,8 @@ class Engine:
 
     def _render_voices(self, voices, p, n, ramp, pitch_mod):
         """Alle aktiven Stimmen vektorisiert (eine numpy-Rechnung statt eine pro Stimme).
-        Liefert (Summe Oszillatoren * Huellkurve, Summe der Huellkurven)."""
+        Liefert (Summe Oszillatoren * Huellkurve, Summe der Huellkurven,
+        groesste Huellkurve ohne Velocity)."""
         sr = self.sr
         semis = np.array([v.note - 69 for v in voices], dtype=np.float64)
         env = np.stack([self._env(v, p, n, ramp) for v in voices])
@@ -256,9 +261,10 @@ class Engine:
                 phase = (phase + adv) % 1.0
             for v, ph in zip(voices, phase):
                 setattr(v, attr, float(ph))
-        return (osc * env).sum(axis=0), env.sum(axis=0)
+        vel = np.array([v.vel for v in voices])
+        return (osc * env).sum(axis=0), env.sum(axis=0), (env / vel[:, None]).max(axis=0)
 
-    def _render_voices_c(self, voices, p, n, pitch_mod):
+    def _render_voices_c(self, voices, p, n, pitch_mod, want_envmax=False):
         """Wie _render_voices, aber die Schleife pro Sample laeuft im C-Kern."""
         sr = self.sr
         a, d, s = p["env.attack"] * sr, p["env.decay"] * sr, p["env.sustain"]
@@ -279,9 +285,11 @@ class Engine:
         vp = np.array(vp)
         ph = np.array(ph)
         mix, env_sum = np.zeros(n), np.zeros(n)
+        env_max = np.zeros(n) if want_envmax else None
         pm = fast.ptr(pitch_mod) if pitch_mod is not None else None
         fast.lib.render_voices(len(voices), n, fast.ptr(vp), fast.ptr(ph), pm,
-                               fast.ptr(mix), fast.ptr(env_sum))
+                               fast.ptr(mix), fast.ptr(env_sum),
+                               fast.ptr(env_max) if want_envmax else None)
         for i, v in enumerate(voices):
             v.phase1, v.phase2 = float(ph[2 * i]), float(ph[2 * i + 1])
             if v.released:
@@ -290,7 +298,7 @@ class Engine:
                     v.active = False
             else:
                 v.t += n
-        return mix, env_sum
+        return mix, env_sum, env_max
 
     def _noise(self, kind: str, n: int) -> np.ndarray:
         white = self.rng.standard_normal(n) * 0.5
@@ -328,12 +336,21 @@ class Engine:
         # Stimmen. Noise wird nur einmal pro Block erzeugt und mit der Summe der
         # Huellkurven multipliziert (klingt gleich, kostet nur einen Bruchteil).
         active = [v for v in self.voices if v.active]
+        amt0, amt1 = self.env_amount_now, p.get("filter.env_amount", 0.0)
+        self.env_amount_now = amt1
+        use_fenv = bool(amt0 or amt1) and bool(active)
+        env_max = None
         if active and fast.lib is not None:
-            mix, env_sum = self._render_voices_c(active, p, n, pitch_mod)
+            mix, env_sum, env_max = self._render_voices_c(active, p, n, pitch_mod, use_fenv)
         elif active:
-            mix, env_sum = self._render_voices(active, p, n, ramp, pitch_mod)
+            mix, env_sum, env_max = self._render_voices(active, p, n, ramp, pitch_mod)
         else:
             mix, env_sum = np.zeros(n), np.zeros(n)
+        # Filter-Huellkurve in Oktaven pro Sample (Amount gerampt gegen Zipper)
+        fenv = None
+        if use_fenv:
+            amt = amt1 if amt0 == amt1 else amt0 + (amt1 - amt0) * ((ramp + 1.0) / n)
+            fenv = env_max * (amt * FENV_OCT)
         if p["mix.noise"] > 0:
             mix += p["mix.noise"] * env_sum * self._noise(p["noise.type"], n)
         mix *= HEADROOM
@@ -347,20 +364,23 @@ class Engine:
         makeup = pre ** -DRIVE_MAKEUP                  # lauter wird es trotzdem etwas, wie analog
         lfo_f = lfo if target == "filter" else None
         if fast.lib is not None:
-            out = self._filter_c(mix, n, ramp, prev, cutoff, res, pre, makeup * LADDER_GAIN, lfo_f, depth)
+            out = self._filter_c(mix, n, ramp, prev, cutoff, res, pre, makeup * LADDER_GAIN, lfo_f, depth,
+                                 fenv)
         else:                                          # Ersatz: Saettigung vor dem Biquad
             if drive > 0:
                 mix = np.tanh(mix * pre) * makeup
             q = 0.707 * 20.0 ** res
-            out = self._filter_np(mix, n, prev, cutoff, q, lfo_f, depth)
+            out = self._filter_np(mix, n, prev, cutoff, q, lfo_f, depth, fenv)
         return self._post(out, p, n, ramp, lfo, target, depth, t0)
 
-    def _filter_c(self, mix, n, ramp, prev, cutoff, res, pre, makeup, lfo, depth):
+    def _filter_c(self, mix, n, ramp, prev, cutoff, res, pre, makeup, lfo, depth, fenv=None):
         """4-Pol-Ladder mit Saettigung, Cutoff pro Sample (weich auch bei voller LFO-Tiefe)."""
         lc0 = math.log(prev)
         logc = lc0 + (math.log(cutoff) - lc0) * ((ramp + 1.0) / n)
         if lfo is not None:
             logc = logc + lfo * (depth * 3.0 * math.log(2.0))     # +-3 Oktaven
+        if fenv is not None:
+            logc = logc + fenv * math.log(2.0)                      # Filter-Huellkurve
         cuts = np.exp(logc)
         np.clip(cuts, 20.0, 0.45 * self.sr, out=cuts)
         out = np.empty(n)
@@ -369,15 +389,19 @@ class Engine:
                                 1.0 + LADDER_COMP * k, float(self.sr), fast.ptr(self.ladder_state))
         return out
 
-    def _filter_np(self, mix, n, prev, cutoff, q, lfo, depth):
+    def _filter_np(self, mix, n, prev, cutoff, q, lfo, depth, fenv=None):
         sr = self.sr
         target = "filter" if lfo is not None else ""
-        sub = SUB_BLOCK_LFO if target == "filter" else SUB_BLOCK
+        sub = SUB_BLOCK_LFO if target == "filter" or fenv is not None else SUB_BLOCK
         nsub = max(1, -(-n // sub))
         cuts = np.exp(np.linspace(math.log(prev), math.log(cutoff), nsub + 1)[1:])
         if target == "filter":
             centers = np.minimum(np.arange(nsub) * sub + sub // 2, n - 1)
             cuts = cuts * 2.0 ** (lfo[centers] * depth * 3.0)   # +-3 Oktaven
+        if fenv is not None:
+            centers = np.minimum(np.arange(nsub) * sub + sub // 2, n - 1)
+            cuts = cuts * 2.0 ** fenv[centers]                    # Filter-Huellkurve
+        np.clip(cuts, 20.0, 0.45 * sr, out=cuts)
         out = np.empty(n)
         zi = self.filter_zi
         for i in range(nsub):
@@ -399,11 +423,12 @@ class Engine:
             gain = gain * (1.0 - depth * 0.5 * (1.0 + lfo))
         out *= gain
 
-        # Delay (Feedback-Echo)
+        # Delay (Feedback-Echo): ein Regler "fx.delay" setzt Mix und Feedback gemeinsam
         d = int(p["fx.delay_time"] * sr)
-        _, echo = self.delay.process(out, d, p["fx.delay_feedback"])
-        if p["fx.delay_mix"] > 0:
-            out = out + p["fx.delay_mix"] * echo
+        dmix, dfb = delay_mix_feedback(p["fx.delay"])
+        _, echo = self.delay.process(out, d, dfb)
+        if dmix > 0:
+            out = out + dmix * echo
         # Hall
         if p["fx.reverb_mix"] > 0:
             out = out + p["fx.reverb_mix"] * self.reverb.process(out, p["fx.reverb_size"])

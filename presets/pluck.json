@@ -9,6 +9,9 @@
     "octave": 1,
     "detune": 7.0
   },
+  "bend": {
+    "range": 2
+  },
   "noise": {
     "type": "pink"
   },
@@ -28,7 +31,9 @@
   },
   "filter": {
     "cutoff": 2200.0,
-    "resonance": 0.3
+    "resonance": 0.3,
+    "drive": 0.0,
+    "env_amount": 0.0
   },
   "lfo": {
     "wave": "sine",
@@ -37,9 +42,8 @@
     "depth": 0
   },
   "fx": {
-    "delay_mix": 0.25,
+    "delay": 0.417,
     "delay_time": 0.28,
-    "delay_feedback": 0.35,
     "reverb_mix": 0.3,
     "reverb_size": 0.6
   }

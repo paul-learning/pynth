@@ -32,7 +32,12 @@ Polyphoner Subtraktiv-Synth in Python (numpy/scipy), spielbar per MIDI-Keyboard
 * **Feste Werte** (in `engine.py` oben, als Konstanten änderbar): 8 Stimmen,
   Velocity-Empfindlichkeit 0,6.
 * **Filter** ist global (paraphon): ein Filter auf die Summe aller Stimmen. Spart auf dem
-  Pi viel CPU. Pro-Stimme-Filter + Filter-Hüllkurve ist der nächste Ausbauschritt.
+  Pi viel CPU. **Env Amount** (−1…+1 = ±4 Oktaven) lässt die Amp-Hüllkurve auch den
+  Cutoff bewegen. Weil es ein Filter für alle ist, folgt es der höchsten Stimmen-Hüllkurve:
+  jeder neue Anschlag öffnet es wieder. Eine eigene Filter-ADSR gibt es bewusst nicht.
+* **Delay**: zwei Regler. „Delay Zeit“ und „Delay“, der Mix und Feedback gemeinsam
+  hochdreht (0 = aus, 1 = Mix 0,6 / Feedback 0,85). Alte Presets, `state.json`,
+  MIDI-Map und Controller-Bänke mit „Delay Mix“ werden beim Laden übernommen.
 * **Web-Stack**: nur Python-Standardbibliothek (`http.server` + Server-Sent Events),
   eine HTML-Datei mit Vanilla-JS. Nichts zu installieren, kaum RAM. Dreht man einen
   MIDI-Knopf, bewegt sich der Slider im Browser mit.

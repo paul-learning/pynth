@@ -9,6 +9,9 @@
     "octave": 0,
     "detune": 7.0
   },
+  "bend": {
+    "range": 2
+  },
   "noise": {
     "type": "white"
   },
@@ -28,7 +31,9 @@
   },
   "filter": {
     "cutoff": 2500.0,
-    "resonance": 0.2
+    "resonance": 0.2,
+    "drive": 0.0,
+    "env_amount": 0.0
   },
   "lfo": {
     "wave": "sine",
@@ -37,9 +42,8 @@
     "depth": 0
   },
   "fx": {
-    "delay_mix": 0,
+    "delay": 0.0,
     "delay_time": 0.35,
-    "delay_feedback": 0.35,
     "reverb_mix": 0.15,
     "reverb_size": 0.6
   }
