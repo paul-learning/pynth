@@ -124,6 +124,15 @@
   #wifilist button.sel { border-color:var(--acc); }
   #wifilist small { color:var(--dim); }
   #wifimsg.err { color:var(--learn); } #wifimsg.ok { color:#46a758; }
+  #sys { margin:0 14px 12px; }
+  #sys summary { cursor:pointer; list-style:none; display:flex; gap:10px; align-items:baseline; }
+  #sys summary h2 { margin:0; }
+  #sysmsg.err { color:var(--learn); }
+  #sysoff { border-color:var(--learn); }
+  #sysoverlay { position:fixed; inset:0; z-index:50; display:grid; place-items:center; padding:24px;
+                background:rgba(10,11,13,.94); color:var(--fg); font-size:20px; text-align:center; line-height:1.5; }
+  #sysoverlay[hidden] { display:none; }
+  body.live #sys { display:none; }
 
   /* --- Live-Ansicht: nur die 8 Knobs der aktiven Bank, groß fürs Tablet --- */
   #viewbtn { font-weight:700; }
@@ -274,6 +283,15 @@
      „Verbinden“. Beim Wechsel ins WLAN wird der Hotspot getrennt: Tablet ins gleiche WLAN und http://pynth.local öffnen.
      Klappt es nicht (z.B. falsches Passwort), kommt der Hotspot nach ca. 1–2 Minuten zurück.</p>
 </details>
+<details class="card" id="sys">
+  <summary><h2>System</h2><span id="syssum" class="legend" style="margin:0">Ausschalten, Neustart</span></summary>
+  <p id="sysstate" class="legend"></p>
+  <div class="slots">
+    <button id="sysoff" title="Zustand sichern und den Pi sauber herunterfahren (statt Stecker ziehen)">⏻ Ausschalten</button>
+    <button id="sysreboot" title="Zustand sichern und den Pi neu starten">Pi neu starten</button></div>
+  <p id="sysmsg"></p>
+</details>
+<div id="sysoverlay" hidden></div>
 <main id="groups"></main>
 <div id="kbwrap">
   <div id="kbbar">
@@ -707,6 +725,7 @@ async function init() {
   es.addEventListener('looper', e => setLooper(JSON.parse(e.data)));
   es.addEventListener('status', e => setStatus(JSON.parse(e.data)));
   es.addEventListener('wifi', e => setWifi(JSON.parse(e.data)));
+  es.addEventListener('system', e => showSystem(JSON.parse(e.data)));
   let lost = false;
   es.onerror = () => { lost = true; $('#status').textContent = 'Verbindung weg - versuche neu ...'; };
   es.onopen = () => { if (lost) location.reload(); };   // z.B. nach Neustart/Update: alles frisch laden
@@ -818,6 +837,26 @@ $('#wifirescan').onclick = async () => {
   m.textContent = 'Hotspot ist ca. 20 s aus. Danach verbindet sich das Tablet meist von selbst wieder, dann Seite neu laden.';
 };
 loadWifi();
+
+// --- System: Ausschalten / Neustart ---
+function showSystem(d) {
+  const o = $('#sysoverlay'); o.hidden = false; o.textContent = d.msg;
+}
+function setSys(st) {
+  $('#sysstate').innerHTML = st.setup ? ''
+    : 'Noch nicht eingerichtet, einmal am Pi ausführen: <code>sudo bash /home/pynth/pynth/deploy/install-system.sh</code>';
+  $('#sysoff').disabled = $('#sysreboot').disabled = !st.setup || !!st.busy;
+}
+const loadSys = () => fetch('/api/system').then(r => r.json()).then(setSys).catch(() => {});
+$('#sys').addEventListener('toggle', () => { if ($('#sys').open) loadSys(); });
+async function sysPower(cmd, question) {
+  if (!confirm(question)) return;
+  const m = $('#sysmsg'); m.className = ''; m.textContent = '...';
+  const r = await post('/api/system/' + cmd).catch(() => ({ok: false, error: 'keine Verbindung'}));
+  if (r.ok) { m.textContent = ''; showSystem(r); } else { m.className = 'err'; m.textContent = r.error; }
+}
+$('#sysoff').onclick = () => sysPower('poweroff', 'Pi jetzt ausschalten? Der aktuelle Sound wird vorher gesichert.');
+$('#sysreboot').onclick = () => sysPower('reboot', 'Pi jetzt neu starten? Der aktuelle Sound wird vorher gesichert.');
 </script>
 </body>
 </html>

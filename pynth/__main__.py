@@ -286,7 +286,8 @@ def run(args, led, t_import):
     gc.freeze()
 
     from .web import App, serve
-    httpd = serve(App(params, engine, presets, midi, ROOT / "web", audio_info, controller), args.host, args.port)
+    httpd = serve(App(params, engine, presets, midi, ROOT / "web", audio_info, controller,
+                      save_state=lambda: save_state(state_file, params)), args.host, args.port)
     log_startup("Web-UI laeuft", t_import)
     led.ready()
 
