@@ -9,6 +9,10 @@ Weitere Modi:
 """
 from __future__ import annotations
 
+import time
+
+T_START = time.monotonic()                  # vor den teuren Importen (numpy, C-Kern)
+
 import argparse
 import gc
 import logging
@@ -16,7 +20,6 @@ import os
 import signal
 import sys
 import threading
-import time
 import wave
 from pathlib import Path
 
@@ -24,12 +27,28 @@ import numpy as np
 
 from . import fast
 from .engine import Engine
+from .leds import StatusLed
 from .params import ParamStore
 from .presets import PresetStore, flatten, nest
 from .storage import load_json, save_json
 
 ROOT = Path(__file__).resolve().parent.parent
 log = logging.getLogger("pynth")
+
+
+def uptime() -> float | None:
+    """Sekunden seit dem Booten des Pi (fuer die Startzeit-Messung im Log)."""
+    try:
+        return float(Path("/proc/uptime").read_text().split()[0])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def log_startup(stage: str, t_import: float):
+    up = uptime()
+    log.info("Startzeit %s: %.1f s nach Prozessstart (Importe %.1f s)%s", stage,
+             time.monotonic() - T_START, t_import,
+             f", {up:.1f} s nach dem Booten" if up is not None else "")
 
 
 def save_state(state_file, params):
@@ -62,6 +81,8 @@ def parse_args():
     ap.add_argument("--midi-monitor", action="store_true", help="eingehende MIDI-Nachrichten anzeigen")
     ap.add_argument("--render", type=Path, default=None)
     ap.add_argument("--preset", default=None, help="Preset beim Start laden")
+    ap.add_argument("--led", default=None,
+                    help="Status-LED unter /sys/class/leds (Standard: ACT bzw. led0, 'off' = keine)")
     ap.add_argument("-v", "--verbose", action="store_true")
     return ap.parse_args()
 
@@ -167,6 +188,18 @@ def main():
     if args.midi_monitor:
         return midi_monitor()
 
+    t_import = time.monotonic() - T_START
+    led = StatusLed("off" if args.render else args.led)
+    led.starting()
+    try:
+        run(args, led, t_import)
+    except BaseException:
+        led.error()
+        raise
+    led.restore()
+
+
+def run(args, led, t_import):
     data = args.data
     presets = PresetStore(data / "presets")
     params = ParamStore()
@@ -225,14 +258,19 @@ def main():
             latency = float(args.latency)
         except ValueError:
             latency = args.latency
-        stream = sd.OutputStream(samplerate=args.samplerate, blocksize=args.blocksize, latency=latency,
-                                 dtype="float32", channels=ch, device=device, callback=callback)
-        stream.start()
+        try:
+            stream = sd.OutputStream(samplerate=args.samplerate, blocksize=args.blocksize, latency=latency,
+                                     dtype="float32", channels=ch, device=device, callback=callback)
+            stream.start()
+        except Exception:
+            log.exception("Audio konnte nicht starten")
+            raise
         audio_info["audio"] = str(sd.query_devices(stream.device)["name"])
         audio_info["latency_ms"] = round(stream.latency * 1000)
         log.info("Audio laeuft: %s, %d Hz, Block %d, Ausgabe-Latenz %.0f ms, DSP-Kern %s",
                  audio_info["audio"], args.samplerate, args.blocksize, stream.latency * 1000,
                  "C" if fast.lib else "numpy")
+        log_startup("Audio laeuft", t_import)
 
     else:                                              # ohne Soundkarte: Engine trotzdem takten
         def dummy_audio():
@@ -249,6 +287,8 @@ def main():
 
     from .web import App, serve
     httpd = serve(App(params, engine, presets, midi, ROOT / "web", audio_info, controller), args.host, args.port)
+    log_startup("Web-UI laeuft", t_import)
+    led.ready()
 
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())

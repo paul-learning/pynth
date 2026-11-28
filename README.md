@@ -79,8 +79,48 @@ Nützliche Optionen:
 | `--preset "Warm Pad"` | Preset beim Start |
 | `--no-audio` | nur UI testen, z.B. am Laptop |
 | `--render demo.wav` | Demo ohne Soundkarte rendern |
+| `--led off` | Status-LED nicht benutzen (Standard: ACT bzw. led0) |
 
 Autostart: siehe `deploy/pynth.service` (Kommentar oben in der Datei, startet mit `--blocksize 512`).
+
+## Startzeit und Status-LED
+
+Pynth wartet beim Booten nicht mehr aufs WLAN (`deploy/pynth.service` startet nur noch nach
+`sound.target`) und lädt scipy nicht mehr, solange der C-Kern läuft (spart auf dem Pi einige
+Sekunden). Die Web-UI ist erreichbar, sobald das WLAN da ist.
+
+Die grüne ACT-LED zeigt, wie weit pynth ist:
+
+| LED | Bedeutung |
+|---|---|
+| schnelles Blinken | pynth startet |
+| Herzschlag (zweimal kurz, Pause) | spielbereit |
+| langsames Blinken | Fehler, z.B. keine Soundkarte (`journalctl -u pynth -e`) |
+| normales Flackern bei SD-Zugriff | pynth läuft nicht (oder ist beendet) |
+
+Dafür muss die Dienst-Datei aktuell sein (sie gibt die LED vor dem Start für pynth frei):
+
+```bash
+sudo cp /home/pynth/pynth/deploy/pynth.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl restart pynth
+```
+
+Keine LED: `--led off` in `ExecStart` ergänzen.
+
+Startzeit messen: pynth schreibt beim Start ins Log, wie lange es gedauert hat, z.B.
+`Startzeit Audio laeuft: 2.1 s nach Prozessstart (Importe 0.9 s), 14.3 s nach dem Booten`.
+
+```bash
+journalctl -u pynth -b | grep Startzeit       # pynth selbst
+systemd-analyze critical-chain pynth.service  # worauf der Dienst beim Booten wartet
+systemd-analyze blame | head -20              # langsamste Dienste
+```
+
+Weitere Sekunden spart man auf dem Pi meist mit Diensten, die pynth nicht braucht (nur wenn
+man sie wirklich nicht nutzt): `sudo systemctl disable NetworkManager-wait-online ModemManager
+cups triggerhappy`, dazu `disable_splash=1` und `boot_delay=0` in `/boot/firmware/config.txt`.
+Nach einem Update, das `pynth/_kernel.c` ändert, dauert der erste Start ein paar Sekunden
+länger (der C-Kern wird neu übersetzt).
 
 ## Latenz
 
@@ -256,6 +296,7 @@ pynth/midi.py     MIDI-Eingang, Hotplug, CC-Mapping, Learn
 pynth/controller.py Knob-Bänke, Pads, Soft-Takeover, Mod-Rad, Looper-Tasten
 pynth/looper.py   MIDI-Looper (Aufnahme, Wiedergabe, Overdub)
 pynth/web.py      HTTP-API + SSE
+pynth/leds.py     Status-LED (startet / spielbereit / Fehler)
 pynth/wifi.py     WLAN-Status, Scan, Verbinden (für die Web-UI)
 deploy/pynth-wifi Fallback-Hotspot + WLAN-Wechsel (root), install-wifi.sh richtet alles ein
 pynth/presets.py  Preset-Format (JSON)

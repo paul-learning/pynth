@@ -73,6 +73,8 @@ def _load():
         lib.ladder_lowpass.restype = None
         lib.feedback_line.argtypes = [_I, _P, _P, _P, _P, _I, _P, _I, _D]
         lib.feedback_line.restype = None
+        lib.iir_filter.argtypes = [_I, _P, _P, _P, _P, _I, _P]
+        lib.iir_filter.restype = None
         return lib
     log.warning("C-Kern nicht verfuegbar, Engine rechnet mit numpy (mehr CPU-Last). "
                 "Abhilfe: sudo apt install gcc")
