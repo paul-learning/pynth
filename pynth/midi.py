@@ -137,7 +137,12 @@ class MidiManager:
                 on = t == "note_on" and msg.velocity > 0
                 if on:
                     self._show(f"Note {msg.note} (Kanal {ch}) Velocity {msg.velocity}")
+                learning = ctl and ctl.learn_slot is not None
                 if ctl and on and ctl.handle_note(ch, msg.note, msg.velocity):
+                    role = None if learning else ctl.role_of("note", ch, msg.note)
+                    if role:                    # sichtbar machen, warum die Taste nicht spielt
+                        self._show(f"Note {msg.note} (Kanal {ch}) ist als {role} belegt und spielt "
+                                   "nicht. Lösen: in der Web-UI Rechtsklick auf das Feld.", hold=4)
                     return
                 if ctl and not on and ctl.handle_note_off(ch, msg.note):
                     return
