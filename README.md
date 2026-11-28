@@ -327,9 +327,12 @@ Die Schleife ist immer eine feste Anzahl **Takte** (4/4) lang, im Tempo **BPM**.
   vorher auf dem alten „Tempo“ (×) lag, steuert jetzt BPM.
 * **Click** (Metronom): Klick auf jeden Schlag, die Eins höher und lauter. An/Aus und Lautstärke
   im Bereich „Looper“, beides per „L“ auf einen Knob legbar. Der Vorzähler klickt immer.
-* **Quantisierung**: rückt beim Aufnehmen jeden Anschlag aufs Raster (aus / 1/4 / 1/8 / 1/16),
-  die Notenlänge bleibt. Live hört man sofort, was man spielt. Auf einem Knob ist das ein
-  Stufenregler: ganz links = aus, dann 1/4, 1/8, 1/16.
+* **Quantisierung** (aus / 1/4 / 1/8 / 1/16) wirkt auf die ganze Schleife, auch auf schon
+  Aufgenommenes, und lässt sich jederzeit ändern: gespeichert wird das Original-Timing, gespielt
+  wird eine aufs Raster gerückte Fassung. Der Anschlag rückt aufs Raster, das Loslassen um
+  denselben Betrag (die Notenlänge bleibt). „aus“ bringt das Original zurück. Live hört man
+  sofort, was man spielt. Auf einem Knob ist das ein Stufenregler: ganz links = aus, dann 1/4,
+  1/8, 1/16.
 * BPM, Takte, Click und Quantisierung gehören nicht zum Klang: Preset laden/speichern lässt sie in Ruhe.
 * Schleifen-Noten und Click werden sample-genau gesetzt (nicht nur am Anfang eines Audio-Blocks).
 * Live gespielte und geloopte Noten haben getrennte Stimmen, gleiche Töne stören sich nicht.
