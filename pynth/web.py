@@ -30,6 +30,7 @@ POST /api/wifi/rescan                                     WLAN-Liste neu (im Hot
 GET  /api/system      {"setup": true, "busy": null}       Ausschalten/Neustart eingerichtet?
 POST /api/system/poweroff                                 Zustand sichern, Pi ausschalten
 POST /api/system/reboot                                   Zustand sichern, Pi neu starten
+POST /api/system/update {"pin": "1234"}                  git pull + Pynth neu starten (Fortschritt per SSE "update")
 """
 from __future__ import annotations
 
@@ -55,7 +56,7 @@ STATIC = {
 
 class App:
     def __init__(self, params, engine, presets, midi, web_dir: Path, audio_info: dict, controller=None,
-                 save_state=None):
+                 save_state=None, repo: Path | None = None, pin_file: Path | None = None):
         self.params, self.engine, self.presets, self.midi = params, engine, presets, midi
         self.controller = controller
         self.web_dir = Path(web_dir)
@@ -68,7 +69,7 @@ class App:
             engine.panic()
             if save_state:
                 save_state()
-        self.system = System(params.broadcast, before_shutdown)
+        self.system = System(params.broadcast, before_shutdown, repo, pin_file)
 
     def state(self) -> dict:
         return {
@@ -234,6 +235,8 @@ def make_handler(app: App):
                     return self._json({"ok": app.wifi.rescan()})
                 if path in ("/api/system/poweroff", "/api/system/reboot"):
                     return self._json(app.system.power(path.rsplit("/", 1)[1]))
+                if path == "/api/system/update":
+                    return self._json(app.system.update(data.get("pin")))
                 if path == "/api/looper":
                     cmd = str(data.get("cmd"))
                     if cmd not in ("record", "stop", "play", "clear"):

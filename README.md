@@ -265,7 +265,7 @@ Update `deploy/pynth-wifi`, das Installationsskript einfach erneut ausführen.
   oder Tastatur/Bildschirm am Pi. Gespeicherte WLANs: `nmcli con show`, WLAN neu verbinden:
   `sudo nmcli dev wifi connect "<SSID>" password "<Passwort>"`.
 
-## Ausschalten und Neustart aus der Web-UI
+## Ausschalten, Neustart und Update aus der Web-UI
 
 In der Detail-Ansicht unter **System**: „⏻ Ausschalten“ sichert den aktuellen Sound, schaltet alle
 Noten aus und fährt den Pi sauber herunter (statt Stecker ziehen, schont die SD-Karte). Wenn die
@@ -279,10 +279,20 @@ sudo bash /home/pynth/pynth/deploy/install-system.sh
 sudo systemctl restart pynth
 ```
 
-Das Skript kopiert die Dienst-Datei und legt eine sudo-Regel an, die dem Benutzer `pynth` genau
-`systemctl --no-block poweroff` und `... reboot` erlaubt, sonst nichts
-(`deploy/pynth-system.sudoers`). Rückgängig: `... install-system.sh --uninstall`.
-Achtung: Jeder im selben WLAN (oder im Hotspot) kann den Knopf drücken, es gibt keine Anmeldung.
+Das Skript kopiert die Dienst-Datei, legt eine sudo-Regel an, die dem Benutzer `pynth` genau
+`systemctl --no-block poweroff`, `... reboot` und `... restart pynth.service` erlaubt, sonst nichts
+(`deploy/pynth-system.sudoers`), und fragt beim ersten Mal nach einer **PIN** für das Update.
+Rückgängig: `... install-system.sh --uninstall`. Neue PIN: `... install-system.sh --pin`.
+Achtung: Ausschalten kann jeder im selben WLAN (oder im Hotspot), es gibt keine Anmeldung.
+
+**Update per Knopf** (System → Update): PIN eingeben, „Update holen + neu starten“. Pynth macht
+`git pull --ff-only origin main` (als `pynth`, ohne sudo), zeigt die neuen Änderungen, übersetzt
+einen geänderten C-Kern gleich mit und startet sich dann neu; die Seite lädt von selbst neu.
+Ist nichts Neues da, startet nichts neu. Klappt der Pull nicht (kein Internet, lokale Änderungen,
+Pi nicht auf `main`), steht der Fehler in der UI und es wird nicht neu gestartet. Ändert ein Update
+die Dienst-Datei, die sudo-Regel, `requirements.txt` oder das WLAN-Skript, steht dabei, was man per
+SSH noch ausführen muss. Die PIN ist nur als Hash in `pin.json` gespeichert (nicht im Repo); nach
+5 falschen Versuchen ist das Update 5 Minuten gesperrt. Das sudo-Passwort geht nie über den Browser.
 
 ## Looper (Record / Stop / Play)
 

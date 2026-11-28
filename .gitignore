@@ -2,6 +2,7 @@
 state.json
 midi_map.json
 controller.json
+pin.json
 *.json.bak
 *.json.tmp
 *.json.broken

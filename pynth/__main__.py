@@ -6,6 +6,7 @@ Weitere Modi:
   python -m pynth --render demo.wav  Kurze Demo als WAV rendern (ohne Soundkarte)
   python -m pynth --no-audio         Nur Web-UI + MIDI (zum UI-Testen am Laptop)
   python -m pynth --midi-monitor     Eingehende MIDI-Nachrichten anzeigen (Strg+C beendet)
+  python -m pynth --set-pin          PIN fuer "Update" in der Web-UI setzen
 """
 from __future__ import annotations
 
@@ -79,6 +80,7 @@ def parse_args():
     ap.add_argument("--list-devices", action="store_true")
     ap.add_argument("--bench", action="store_true")
     ap.add_argument("--midi-monitor", action="store_true", help="eingehende MIDI-Nachrichten anzeigen")
+    ap.add_argument("--set-pin", action="store_true", help="PIN fuer 'Update' in der Web-UI setzen")
     ap.add_argument("--render", type=Path, default=None)
     ap.add_argument("--preset", default=None, help="Preset beim Start laden")
     ap.add_argument("--led", default=None,
@@ -187,6 +189,9 @@ def main():
         return bench(args)
     if args.midi_monitor:
         return midi_monitor()
+    if args.set_pin:
+        from .system import set_pin
+        sys.exit(set_pin(args.data / "pin.json"))
 
     t_import = time.monotonic() - T_START
     led = StatusLed("off" if args.render else args.led)
@@ -287,7 +292,8 @@ def run(args, led, t_import):
 
     from .web import App, serve
     httpd = serve(App(params, engine, presets, midi, ROOT / "web", audio_info, controller,
-                      save_state=lambda: save_state(state_file, params)), args.host, args.port)
+                      save_state=lambda: save_state(state_file, params),
+                      repo=ROOT, pin_file=data / "pin.json"), args.host, args.port)
     log_startup("Web-UI laeuft", t_import)
     led.ready()
 
