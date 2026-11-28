@@ -803,9 +803,7 @@ function setWifi(w) {
 let wifiListed = false;
 const loadWifi = () => fetch('/api/wifi').then(r => r.json()).then(setWifi).catch(() => {});
 $('#wifi').addEventListener('toggle', () => {
-  try { sessionStorage.setItem('wifiOpen', $('#wifi').open ? '1' : ''); } catch (e) {}
   if ($('#wifi').open) loadWifi(); });
-try { if (sessionStorage.getItem('wifiOpen')) $('#wifi').open = true; } catch (e) {}   // nach Neuladen offen lassen
 $('#wifiscan').onclick = () => showWifiList();
 async function showWifiList() {
   wifiListed = true;
@@ -886,9 +884,7 @@ $('#updform').onsubmit = async e => {
 };
 const loadSys = () => fetch('/api/system').then(r => r.json()).then(setSys).catch(() => {});
 $('#sys').addEventListener('toggle', () => {
-  try { sessionStorage.setItem('sysOpen', $('#sys').open ? '1' : ''); } catch (e) {}
   if ($('#sys').open) loadSys(); });
-try { if (sessionStorage.getItem('sysOpen')) $('#sys').open = true; } catch (e) {}   // nach Neuladen offen lassen
 async function sysPower(cmd, question) {
   if (!confirm(question)) return;
   const m = $('#sysmsg'); m.className = ''; m.textContent = '...';
