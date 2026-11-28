@@ -2,14 +2,25 @@
 <html lang="de">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Pynth</title>
+<!-- Vom Home-Bildschirm gestartet laeuft die UI ohne Adressleiste (auch auf dem iPhone) -->
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#0e1013">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Pynth">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="/icon-192.png">
 <style>
   :root { --bg:#14161a; --card:#1e2127; --line:#2c3038; --fg:#e6e8eb; --dim:#8a919c; --acc:#f0a03c; --learn:#e5484d; }
   * { box-sizing:border-box; }
   body { margin:0; font:14px/1.4 system-ui, sans-serif; background:var(--bg); color:var(--fg); }
   header { position:sticky; top:0; z-index:5; display:flex; flex-wrap:wrap; gap:8px; align-items:center;
-           padding:10px 14px; background:#0e1013; border-bottom:1px solid var(--line); }
+           padding:10px 14px; background:#0e1013; border-bottom:1px solid var(--line);
+           padding-top:max(10px, env(safe-area-inset-top)); padding-left:max(14px, env(safe-area-inset-left));
+           padding-right:max(14px, env(safe-area-inset-right)); }
   header h1 { font-size:18px; margin:0 10px 0 0; letter-spacing:.05em; }
   select, input[type=text], input[type=password], button { font:inherit; color:var(--fg); background:var(--card);
            border:1px solid var(--line); border-radius:6px; padding:6px 10px; }
@@ -125,7 +136,9 @@
   body.live header { flex-wrap:nowrap; }
   body.live #viewbtn { margin-left:auto; }
   body.live { display:flex; flex-direction:column; height:100vh; height:100dvh; overflow:hidden; }
-  #live { flex-direction:column; gap:12px; padding:12px 14px 14px; flex:1; min-height:0; overflow-y:auto; }
+  #live { flex-direction:column; gap:12px; padding:12px 14px 14px; flex:1; min-height:0; overflow-y:auto;
+          padding-left:max(14px, env(safe-area-inset-left)); padding-right:max(14px, env(safe-area-inset-right));
+          padding-bottom:max(14px, env(safe-area-inset-bottom)); overscroll-behavior:contain; }
   #livehead { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
   #livebank { font-size:clamp(22px, calc(4 * var(--u)), 40px); font-weight:800; color:var(--bank, var(--acc)); letter-spacing:.02em; }
   #livebank.flash { animation:flash .4s; }
@@ -151,7 +164,12 @@
   .lk .opts span.on { background:var(--bank, var(--acc)); border-color:var(--bank, var(--acc)); color:#111; }
   #touchbtn { min-height:44px; font-size:16px; padding:6px 14px; }
   #touchbtn.on { background:var(--bank, var(--acc)); border-color:var(--bank, var(--acc)); color:#111; font-weight:700; }
-  body.touch .lk:not(.empty) { touch-action:none; cursor:ns-resize; user-select:none; -webkit-user-select:none; }
+  /* Touch an: nur der Wert-Bereich unten in der Kachel ist Regler, oben (Name) scrollt die Seite */
+  body.touch .lk:not(.empty) { touch-action:pan-y; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
+  .lk .dz { margin-top:auto; }
+  body.touch .lk .dz { touch-action:none; cursor:ns-resize; margin:auto -8px -6px; padding:4px 8px 6px;
+                       border-radius:10px; background:rgba(255,255,255,.04); }
+  #fsbtn { min-height:44px; min-width:44px; font-size:18px; padding:6px 10px; }
   body.touch .lk .opts span { cursor:pointer; }
   .lk.drag { border-color:var(--bank, var(--acc)); }
   .lk .pk { font-size:clamp(11px, calc(1.3 * var(--u)), 15px); font-weight:600; }
@@ -182,7 +200,8 @@
 </header>
 <section id="live">
   <div id="livehead"><span id="livebank">Bank 1</span>
-    <button id="touchbtn" title="An: Kachel hoch/runter wischen ändert den Wert, Auswahl antippen, Doppeltipp = Standardwert">✋ Touch aus</button>
+    <button id="touchbtn" title="An: auf dem Wert (unterer Teil der Kachel) hoch/runter wischen ändert ihn, Auswahl antippen, Doppeltipp = Standardwert. Oben auf der Kachel wischen scrollt.">✋ Touch aus</button>
+    <button id="fsbtn" hidden title="Vollbild (blendet die Browser-Leisten aus)">⛶</button>
     <div id="livebanks"></div></div>
   <div id="liveknobs"></div>
   <div id="livemsg" hidden>Kein Controller gefunden: die Live-Ansicht zeigt die Knob-Bänke, sobald ein MIDI-Controller da ist.</div>
@@ -537,7 +556,7 @@ function buildLive() {
       + `<div class="nm">${esc(p.label)}</div>`
       + (p.choices.length   // Auswahl-Regler (z.B. Wellenform): alle Optionen zeigen, gewählte markiert
         ? `<div class="opts">${p.choices.map(c => `<span data-v="${esc(c)}">${esc(c)}</span>`).join('')}</div>`
-        : `<div class="v"></div><div class="bar"><div></div></div>`);
+        : `<div class="dz"><div class="v"></div><div class="bar"><div></div></div></div>`);
     (liveTiles[pid] = liveTiles[pid] || []).push({v: t.querySelector('.v'), bar: t.querySelector('.bar div'),
                                                   opts: t.querySelector('.opts'), tile: t});
     grid.appendChild(t);
@@ -571,6 +590,7 @@ function liveTouch(t, p) {
   let drag = null;
   t.onpointerdown = e => {
     if (!touchOn()) return;
+    if (e.pointerType !== 'mouse' && !e.target.closest('.dz')) return;   // oben auf der Kachel: Seite scrollen
     const now = performance.now();
     if (now - lastTap < 300) { setLiveValue(p, p.default); lastTap = 0; return; }   // Doppeltipp = Standard
     lastTap = now;
@@ -601,6 +621,22 @@ function setView(live) {
 $('#bankname').onchange = e => post('/api/ctrl/bankname', {bank: +e.target.dataset.bank, name: e.target.value});
 $('#bankname').onkeydown = e => { if (e.key === 'Enter') e.target.blur(); };
 $('#viewbtn').onclick = () => setView(!document.body.classList.contains('live'));
+// Vollbild: blendet Adress- und Navigationsleiste aus (Android, iPad, Desktop). Das iPhone kann das
+// nicht, dort die Seite über "Teilen > Zum Home-Bildschirm" ablegen, dann startet sie ohne Leisten.
+{
+  const de = document.documentElement, fsb = $('#fsbtn');
+  const fsEl = () => document.fullscreenElement || document.webkitFullscreenElement;
+  const enter = de.requestFullscreen ? () => de.requestFullscreen({navigationUI: 'hide'})
+    : de.webkitRequestFullscreen ? () => de.webkitRequestFullscreen() : null;
+  const exit = () => (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+  const standalone = matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches || navigator.standalone;
+  if (enter && !standalone) {
+    fsb.hidden = false;
+    fsb.onclick = () => { try { const r = fsEl() ? exit() : enter(); if (r && r.catch) r.catch(() => {}); } catch (e) {} };
+    const upd = () => { fsb.textContent = fsEl() ? '✕' : '⛶'; fsb.title = fsEl() ? 'Vollbild beenden' : 'Vollbild (blendet die Browser-Leisten aus)'; };
+    document.addEventListener('fullscreenchange', upd); document.addEventListener('webkitfullscreenchange', upd);
+  }
+}
 try { setView(localStorage.getItem('pynthView') === 'live'); } catch (e) { setView(false); }
 
 function refreshKnobVals() {

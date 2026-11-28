@@ -200,9 +200,14 @@ Alle Bänke starten leer und werden selbst belegt:
   Bank, groß fürs Tablet, mit Regler-Name und aktuellem Wert. Wechselt mit, wenn man per Pad die
   Bank umschaltet. Freie Knobs sind gestrichelt. „Detail-Ansicht“ führt zurück; der Browser merkt
   sich die zuletzt gewählte Ansicht.
-  Mit **„✋ Touch an“** lassen sich die Werte auch am Tablet ändern: Kachel hoch/runter wischen,
-  bei Auswahl-Reglern (z.B. Wellenform) die Option antippen, Doppeltipp = Standardwert. Standard ist
-  „Touch aus“, damit beim Spielen nichts aus Versehen verstellt wird.
+  Mit **„✋ Touch an“** lassen sich die Werte auch am Tablet ändern: auf dem Wert (unterer, leicht
+  hinterlegter Teil der Kachel) hoch/runter wischen, bei Auswahl-Reglern (z.B. Wellenform) die Option
+  antippen, Doppeltipp = Standardwert. Wischen auf dem oberen Teil (Name) scrollt die Seite. Standard
+  ist „Touch aus“, damit beim Spielen nichts aus Versehen verstellt wird.
+  **Ohne Adressleiste:** „⛶“ in der Live-Ansicht schaltet auf Vollbild (Android, iPad, Desktop).
+  Auf dem iPhone geht das nicht, dort in Safari „Teilen → Zum Home-Bildschirm“: vom Home-Bildschirm
+  gestartet läuft Pynth ohne Browser-Leisten. (Unter Android legt Chrome über http nur eine
+  Verknüpfung an, die im Browser öffnet; dort also besser „⛶“ nehmen.)
 * **Bänke benennen**: unter den Bank-Tasten in „Controller-Knobs“ (z.B. „Filter“, „FX“); der Name
   steht dann in der Bank-Anzeige und groß in der Live-Ansicht.
 * **Mod-Rad** (CC 1) steuert standardmäßig die LFO-Tiefe, umstellbar in der Web-UI.
