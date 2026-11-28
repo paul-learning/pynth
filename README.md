@@ -338,6 +338,10 @@ Die Schleife ist immer eine feste Anzahl **Takte** (4/4) lang, im Tempo **BPM**.
   Takt +, Takt −): Feld anklicken, Taste drücken. Eine Taste, die vorher als Pad die Bank
   umgeschaltet hat, wird dabei als Pad entfernt. Tasten, die MIDI Machine Control (MMC-Sysex)
   senden, funktionieren ohne Anlernen (Vor = Takt +, Zurück = Takt −).
+  Ein angeklicktes Feld wartet höchstens 60 s auf eine Taste, danach ist es wieder aus (sonst
+  würde später eine Keyboard-Note angelernt). Ist eine Keyboard-Taste aus Versehen belegt, zeigt
+  die MIDI-Zeile beim Drücken, wofür (z.B. „Note 62 ist als Looper-Taste „Takt +“ belegt“):
+  Rechtsklick auf das Feld löst sie.
 * **Live-Ansicht**: oben ein Looper-Streifen mit Record/Stop/Play, Position (Takt.Schlag), den
   vier Schlägen, einem Balken mit Takt-Strichen, Takte −/+, BPM, Click und Quantisierung
   (antippen schaltet um). Hochkant stehen die Einstellungen in einer Zeile darunter.
