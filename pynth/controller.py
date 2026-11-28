@@ -28,6 +28,8 @@ LEARN_MIN_MOVE = 4              # Knob-Learn: erst nach so vielen Schritten Bewe
 TAKEOVER_MODES = ("jump", "pickup")
 RELEASE_WINDOW = 0.8            # Weiter-Taste: Loslassen so kurz nach dem Druecken = kein neuer Druck
 TRANSPORT = ("record", "stop", "play", "bar_add", "bar_remove")    # Looper-Tasten (Takt +/-: Vor/Zurueck)
+LEARN_TIMEOUT = 60.0            # Tasten-Learn (Pad/Weiter/Looper) verfaellt: sonst schluckt es spaeter eine Keyboard-Note
+TRANSPORT_LABELS = ("Record", "Stop", "Play", "Takt +", "Takt −")
 PC_CC_GAP = 0.3                 # CC 0 direkt nach Program Change ist Bank-Select des Presets, kein Pad
 
 DEFAULT_CONFIG = {
@@ -75,6 +77,7 @@ class Controller:
         self._wizard_done: set[str] = set()                  # in diesem Einrichten-Durchlauf schon gelernt
         self._nb_state: dict[str, dict] = {}                 # Weiter-Taste: letzter Zustand je Eingang
         self._last_pc = 0.0
+        self._learn_t = 0.0
         self.on_learned = None                               # Callback(spec): z.B. alte Direkt-Belegung loeschen
         self.on_transport = None                             # Callback(eins aus TRANSPORT): Looper
         self._load()
@@ -147,7 +150,31 @@ class Controller:
             self.learn_slot, self.wizard = None, False
         self._learn_seen = {}
         self._wizard_done = set()
+        self._learn_t = time.monotonic()
         self._announce()
+
+    def _button_learning(self) -> bool:
+        """Wird gerade eine Taste (Pad, Weiter, Looper) angelernt? Verfaellt nach LEARN_TIMEOUT."""
+        if not (self.learn_slot and self.learn_slot[0] in ("pad", "next", "transport")):
+            return False
+        if not self.wizard and time.monotonic() - self._learn_t > LEARN_TIMEOUT:
+            log.info("Tasten-Learn abgelaufen (%s)", self.learn_slot[0])
+            self.learn_slot = None
+            self._announce()
+            return False
+        return True
+
+    def role_of(self, kind: str, channel: int, number: int) -> str | None:
+        """Wofuer ist dieser Eingang belegt? (Text fuer die Web-UI, z.B. 'Looper-Taste Takt +')"""
+        for i, s in enumerate(self.config["transport"]):
+            if _matches(s, kind, channel, number):
+                return f"Looper-Taste „{TRANSPORT_LABELS[i]}“"
+        for i, s in enumerate(self.config["pads"]):
+            if _matches(s, kind, channel, number):
+                return f"Pad {i + 1}"
+        if any(_matches(s, kind, channel, number) for s in self.config["next_bank"]):
+            return "Weiter-Taste"
+        return None
 
     def set_takeover(self, mode: str):
         if mode in TAKEOVER_MODES:
@@ -309,7 +336,7 @@ class Controller:
 
     def handle_note_off(self, channel: int, note: int) -> bool:
         """Note-Off. True = gehoert zum Controller, nicht an die Engine."""
-        if self.learn_slot and self.learn_slot[0] in ("pad", "next", "transport"):
+        if self._button_learning():
             return self.is_pad_note(channel, note)
         if self._transport_input("note", channel, note, False):
             return True
@@ -328,7 +355,7 @@ class Controller:
         """Program Change (manche Controller-Pads senden das). True = verarbeitet."""
         spec = f"pc:{channel}:{program}"
         self._last_pc = time.monotonic()
-        if self.learn_slot and self.learn_slot[0] in ("pad", "next", "transport"):
+        if self._button_learning():
             self._learn_input(spec)
             return True
         if self._transport_input("pc", channel, program, True):
@@ -338,7 +365,7 @@ class Controller:
     def handle_note(self, channel: int, note: int, velocity: int) -> bool:
         """Note-On. True = gehoert zum Controller (Pad), nicht spielen."""
         spec = f"note:{channel}:{note}"
-        if self.learn_slot and self.learn_slot[0] in ("pad", "next", "transport"):
+        if self._button_learning():
             self._learn_input(spec)
             return True
         if self._transport_input("note", channel, note, True):
