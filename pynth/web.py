@@ -12,7 +12,7 @@ POST /api/preset/delete{"name": "Mein Sound"}
 POST /api/midi/learn   {"id": "filter.cutoff"}   (id null = abbrechen)
 POST /api/midi/unmap   {"id": "filter.cutoff"}
 POST /api/panic
-POST /api/range        {"id": "looper.speed", "min": 0.25, "max": 5}   Reglerbereich (nur wo erlaubt)
+POST /api/range        {"id": "looper.bpm", "min": 60, "max": 180}   Reglerbereich (nur wo erlaubt)
 POST /api/looper       {"cmd": "record"}                   record | stop | play | clear
 POST /api/ctrl/bank    {"bank": 0}                         aktive Knob-Bank (0-3)
 POST /api/ctrl/learn   {"slot": "knob", "index": 0, "wizard": true}   (slot null = abbrechen)

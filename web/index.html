@@ -87,8 +87,15 @@
   #lrec.on { background:var(--learn); border-color:var(--learn); }
   #lplay.on { background:#46a758; border-color:#46a758; }
   #lrec.armed { background:var(--learn); border-color:var(--learn); color:#fff; animation:blink 1s infinite; }
-  #lbar { height:8px; background:#0e1013; border:1px solid var(--line); border-radius:4px; margin:10px 0 6px; overflow:hidden; }
+  #lbar { position:relative; height:12px; background:#0e1013; border:1px solid var(--line); border-radius:4px; margin:10px 0 6px; overflow:hidden; }
   #lbar div { height:100%; width:0; background:var(--acc); }
+  /* Takt-/Schlag-Striche ueber dem Fortschritt (--nb = Takte), gilt fuer alle Loop-Balken */
+  .ticks::after { content:''; position:absolute; inset:0; pointer-events:none;
+    background:repeating-linear-gradient(to right, transparent 0 calc(100% / var(--nb, 4) - 2px), #0e1013 0 calc(100% / var(--nb, 4))),
+               repeating-linear-gradient(to right, transparent 0 calc(25% / var(--nb, 4) - 1px), rgba(14,16,19,.55) 0 calc(25% / var(--nb, 4))); }
+  #looper .tp .bars { display:flex; align-items:center; gap:6px; margin-left:8px; }
+  #looper .tp .bars button { min-width:44px; }
+  #lbarsval { min-width:70px; text-align:center; font-weight:700; font-variant-numeric:tabular-nums; }
   #ltext { font-size:12px; color:var(--dim); }
   /* Looper-Mini-Anzeige im Header (beide Ansichten) */
   #loopmini { display:flex; align-items:center; gap:6px; padding:4px 8px; border:1px solid var(--line);
@@ -146,6 +153,7 @@
   body.live #midiinfo, body.live #looper, body.live #ctrl, body.live #setupcards, body.live #groups, body.live #kbwrap,
   body.live #presets, body.live #pname, body.live #save, body.live #del, body.live #status, body.live #bankpill { display:none; }
   body.live header { flex-wrap:nowrap; }
+  body.live #loopmini { display:none; }
   body.live #viewbtn { margin-left:auto; }
   body.live { display:flex; flex-direction:column; height:100vh; height:100dvh; overflow:hidden; }
   #live { flex-direction:column; gap:12px; padding:12px 14px 14px; flex:1; min-height:0; overflow-y:auto;
@@ -190,6 +198,50 @@
   .lk.empty .nm { color:var(--dim); font-weight:500; }
   .lk.hot { border-color:var(--bank, var(--acc)); }
   #livemsg { color:var(--dim); font-size:18px; }
+  /* Looper in der Live-Ansicht: Tasten | Position (Takt.Schlag, Schlag-Punkte, Takt-Balken) | Takte/BPM/Click/Q */
+  #liveloop { display:grid; grid-template-columns:auto minmax(0, 1fr) auto; gap:clamp(8px, calc(1.4 * var(--u)), 16px);
+              align-items:stretch; background:var(--card); border:2px solid var(--line); border-radius:14px;
+              padding:clamp(8px, calc(1.2 * var(--u)), 14px); --lc:var(--dim); }
+  #liveloop.rec { --lc:var(--learn); border-color:var(--learn); }
+  #liveloop.play { --lc:#46a758; border-color:#46a758; }
+  #liveloop.dub { --lc:var(--learn); border-color:#46a758; box-shadow:0 0 0 2px var(--learn) inset; }
+  #liveloop .ltp { display:flex; gap:8px; align-items:center; }
+  #liveloop .ltp button { width:clamp(48px, calc(7 * var(--u)), 84px); height:clamp(48px, calc(7 * var(--u)), 84px); padding:0;
+                          font-size:clamp(20px, calc(3 * var(--u)), 34px); border-radius:12px; color:var(--dim); }
+  #llrec.on, #llrec.armed { background:var(--learn); border-color:var(--learn); color:#fff; }
+  #llrec.armed { animation:blink 1s infinite; }
+  #llplay.on { background:#46a758; border-color:#46a758; color:#111; }
+  #llstop.on { color:var(--fg); border-color:var(--dim); }
+  #liveloop .lpos { display:flex; flex-direction:column; justify-content:center; gap:6px; min-width:0; }
+  #liveloop .lrow { display:flex; align-items:baseline; gap:clamp(8px, calc(1.5 * var(--u)), 18px); min-width:0; }
+  #llpos { font-size:clamp(26px, calc(4.6 * var(--u)), 60px); font-weight:800; font-variant-numeric:tabular-nums; line-height:1;
+           color:var(--lc); white-space:nowrap; }
+  #llstate { font-size:clamp(12px, calc(1.6 * var(--u)), 18px); color:var(--lc); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #lldots { display:flex; gap:6px; margin-left:auto; align-self:center; }
+  #lldots i { width:clamp(12px, calc(2 * var(--u)), 26px); height:clamp(12px, calc(2 * var(--u)), 26px); border-radius:50%;
+              border:2px solid var(--line); }
+  #lldots i:first-child { border-color:var(--dim); }
+  #lldots i.on { background:var(--lc); border-color:var(--lc); }
+  #llbar { position:relative; height:clamp(14px, calc(2 * var(--u)), 24px); background:#0e1013; border-radius:6px; overflow:hidden; }
+  #llbar div { position:absolute; left:0; top:0; bottom:0; width:0; background:var(--lc); }
+  #liveloop .lset { display:grid; grid-template-columns:repeat(2, auto); gap:6px; align-content:center; }
+  #liveloop .lset > * { min-height:40px; font-size:clamp(13px, calc(1.8 * var(--u)), 20px); font-weight:700; white-space:nowrap;
+                        border-radius:8px; padding:4px 10px; display:flex; align-items:center; justify-content:center; gap:6px; }
+  #liveloop .lset .chip { border:1px solid var(--line); font-variant-numeric:tabular-nums; }
+  #llbars { padding:0 !important; gap:0 !important; border:1px solid var(--line); }
+  #llbars button { border:0; background:transparent; min-width:40px; min-height:40px; font-size:inherit; font-weight:800; padding:0 8px; }
+  #llbars span { min-width:4.2em; text-align:center; }
+  #llclick.on, #llq.on { background:var(--acc); border-color:var(--acc); color:#111; }
+  @media (orientation:portrait) {       /* hochkant: Tasten + Position oben, Einstellungen als Zeile darunter */
+    #liveloop { grid-template-columns:auto minmax(0, 1fr); }
+    #liveloop .lset { grid-column:1 / -1; grid-template-columns:auto 1fr 1fr 1fr; }
+  }
+  @media (max-width:520px) {            /* Handy: Einstellungen 2 x 2, kein Zustandstext (Farbe zeigt ihn) */
+    #liveloop .lset { grid-template-columns:1fr 1fr; }
+    #liveloop .ltp { gap:6px; }
+    #llstate { display:none; }
+    #lldots { gap:4px; }
+  }
 </style>
 </head>
 <body>
@@ -215,6 +267,21 @@
     <button id="touchbtn" title="An: auf dem Wert (unterer Teil der Kachel) hoch/runter wischen ändert ihn, Auswahl antippen, Doppeltipp = Standardwert. Oben auf der Kachel wischen scrollt.">✋ Touch aus</button>
     <button id="fsbtn" hidden title="Vollbild (blendet die Browser-Leisten aus)">⛶</button>
     <div id="livebanks"></div></div>
+  <div id="liveloop" title="Looper">
+    <div class="ltp">
+      <button id="llrec" title="Record: ein Takt Vorzähler, dann Aufnahme. Während die Schleife läuft: Overdub">●</button>
+      <button id="llstop" title="Stop">■</button>
+      <button id="llplay" title="Play (auch leer: nur Click)">▶</button></div>
+    <div class="lpos">
+      <div class="lrow"><span id="llpos">1.1</span><span id="llstate">leer</span>
+        <span id="lldots"><i></i><i></i><i></i><i></i></span></div>
+      <div id="llbar" class="ticks"><div></div></div></div>
+    <div class="lset">
+      <div id="llbars" class="chip" title="Länge der Schleife (Vor/Zurück am Controller)"><button id="llbm">−</button><span id="llbarsv">4 Takte</span><button id="llbp">+</button></div>
+      <span id="llbpm" class="chip" title="Tempo (Regler BPM, per L auf einen Knob legbar)">120 BPM</span>
+      <button id="llclick" title="Click (Metronom) an/aus, betonte Eins">Click aus</button>
+      <button id="llq" title="Quantisierung der Aufnahme: aus → 1/4 → 1/8 → 1/16">Q aus</button></div>
+  </div>
   <div id="liveknobs"></div>
   <div id="livemsg" hidden>Kein Controller gefunden: die Live-Ansicht zeigt die Knob-Bänke, sobald ein MIDI-Controller da ist.</div>
 </section>
@@ -226,17 +293,19 @@
     <button id="lstop" title="Stop">■ Stop</button>
     <button id="lplay" title="Play: Schleife von vorn abspielen">▶ Play</button>
     <button id="lclear" title="Schleife löschen">Löschen</button>
+    <span class="bars" title="Länge der Schleife in Takten (Vor/Zurück am Controller). Weniger Takte löschen nichts: mit mehr Takten kommen die Noten wieder.">
+      <button id="lbm">Takt −</button><span id="lbarsval">4 Takte</span><button id="lbp">Takt +</button></span>
   </div>
-  <div id="lbar"><div></div></div>
+  <div id="lbar" class="ticks"><div></div></div>
   <div id="ltext"></div>
-  <div class="slots" id="lrange" title="Bereich des Tempo-Reglers (Slider, Knob, Live-Ansicht). Erlaubt 0,1× bis 10×.">
-    Tempo-Regler von <input type="number" id="lsmin" min="0.1" max="10" step="0.05"> ×
-    bis <input type="number" id="lsmax" min="0.1" max="10" step="0.5"> ×
-    <span class="legend" style="margin:0">(0,1–10×, 1× bleibt Doppelklick)</span></div>
+  <div class="slots" id="lrange" title="Bereich des BPM-Reglers (Slider, Knob, Live-Ansicht). Erlaubt 30 bis 300. Kleiner Bereich = feinere Schritte am Knob.">
+    BPM-Regler von <input type="number" id="lsmin" min="30" max="300" step="1">
+    bis <input type="number" id="lsmax" min="30" max="300" step="1">
+    <span class="legend" style="margin:0">(30–300, Doppelklick = 120)</span></div>
   <details>
     <summary class="legend" style="cursor:pointer">Tasten am Controller anlernen</summary>
     <p class="legend">Feld anklicken, dann die Taste am Controller drücken. Rechtsklick löscht.
-      Tasten, die MMC senden, gehen ohne Anlernen. Eine Taste, die vorher die Bank umgeschaltet hat,
+      Tasten, die MMC senden (viele Transport-Tasten ab Werk, auch Vor/Zurück), gehen ohne Anlernen. Eine Taste, die vorher die Bank umgeschaltet hat,
       wird dabei als Pad entfernt.</p>
     <div class="slots" id="tpslots"></div>
   </details>
@@ -472,79 +541,118 @@ function buildCtrl() {
   }
 }
 // --- Looper ---
-let loop = null, loopA = {t: 0, pos: 0, speed: 1};   // Anker: Position + Tempo zu einem Zeitpunkt
-const loopSpeed = () => +(values['looper.speed'] || 1);
-function loopPos() {     // Position im Browser rechnen (kein Netzverkehr), Tempo-Wechsel setzt neuen Anker
-  const now = performance.now() / 1000, sp = loopSpeed();
-  if (loop.state !== 'recording' && sp !== loopA.speed) {
-    loopA = {t: now, pos: loopA.pos + (now - loopA.t) * loopA.speed, speed: sp};
-  }
-  return loopA.pos + (now - loopA.t) * (loop.state === 'recording' ? 1 : loopA.speed);
+// Position in Schlägen. Der Browser rechnet sie aus Anker + BPM weiter (kein Netzverkehr),
+// der Pi schickt bei jedem Zustandswechsel und Schleifenanfang einen neuen Anker.
+let loop = null, loopA = {t: 0, pos: 0, bpm: 120};
+const BEATS = 4;
+const loopBpm = () => +(values['looper.bpm'] || 120);
+const loopBars = () => Math.max(1, Math.round(+(values['looper.bars'] || 4)));
+const loopRunning = () => loop && ['countin', 'recording', 'playing', 'overdub'].includes(loop.state);
+function loopPos() {
+  const now = performance.now() / 1000, b = loopBpm();
+  if (b !== loopA.bpm) loopA = {t: now, pos: loopA.pos + (now - loopA.t) * loopA.bpm / 60, bpm: b};
+  if (!loopRunning()) return loop.pos;
+  const p = loopA.pos + (now - loopA.t) * loopA.bpm / 60;
+  if (loop.state === 'countin') return Math.min(p, -1e-6);
+  return p % (loopBars() * BEATS);
 }
-const LOOP_TXT = {empty: 'Leer. Record drücken, die Aufnahme startet mit der ersten Note.',
-  armed: 'Bereit: Aufnahme startet mit der ersten Note ...',
-  recording: 'Aufnahme läuft. Stop = fertig, Play/Rec = fertig und sofort abspielen.',
+const LOOP_TXT = {empty: 'Leer. Record: ein Takt Vorzähler, dann Aufnahme über alle Takte. Play: nur Click, Rec = dazuspielen.',
+  countin: 'Vorzähler: die Aufnahme startet auf der Eins ...',
+  recording: 'Aufnahme läuft bis zum Ende der Takte, dann spielt die Schleife. Rec = weiter aufnehmen, Play = fertig, Stop = aus.',
   stopped: 'Schleife bereit. Play spielt sie ab, Record nimmt neu auf.',
   playing: 'Schleife läuft. Regler wirken live mit. Rec = dazuspielen (Overdub), Stop = aus.',
   overdub: 'Overdub: was du spielst, kommt zur Schleife dazu. Rec oder Play = fertig.'};
+const LOOP_SHORT = {empty: 'leer', countin: 'Vorzähler', recording: '● Aufnahme', stopped: 'bereit',
+  playing: '▶ läuft', overdub: '● Overdub'};
 function setLooper(d) {
-  loop = d; loopA = {t: performance.now() / 1000, pos: d.pos, speed: loopSpeed()};
-  const s = d.state;
-  $('#lrec').className = s === 'armed' ? 'armed' : (s === 'recording' || s === 'overdub') ? 'on' : '';
-  $('#lplay').className = (s === 'playing' || s === 'overdub') ? 'on' : '';
-  $('#loopmini').className = {armed: 'rec', recording: 'rec', playing: 'play', overdub: 'dub'}[s] || '';
-  $('#lmrec').className = 'lm' + (s === 'armed' ? ' armed' : (s === 'recording' || s === 'overdub') ? ' on' : '');
-  $('#lmplay').className = 'lm' + ((s === 'playing' || s === 'overdub') ? ' on' : '');
-  $('#lmstop').className = 'lm' + (s === 'stopped' ? ' on' : '');
+  loop = d; loopA = {t: performance.now() / 1000, pos: d.pos, bpm: loopBpm()};
+  const s = d.state, rec = s === 'recording' || s === 'overdub', run = s === 'playing' || s === 'overdub';
+  $('#lrec').className = s === 'countin' ? 'armed' : rec ? 'on' : '';
+  $('#lplay').className = run ? 'on' : '';
+  const cls = {countin: 'rec', recording: 'rec', playing: 'play', overdub: 'dub'}[s] || '';
+  $('#loopmini').className = cls; $('#liveloop').className = cls;
+  for (const [r, p, st] of [['#lmrec', '#lmplay', '#lmstop'], ['#llrec', '#llplay', '#llstop']].map(x => x.map($))) {
+    r.className = (r.classList.contains('lm') ? 'lm' : '') + (s === 'countin' ? ' armed' : rec ? ' on' : '');
+    p.className = (p.id === 'lmplay' ? 'lm' : '') + (run ? ' on' : '');
+    st.className = (st.id === 'lmstop' ? 'lm' : '') + (s === 'stopped' ? ' on' : '');
+  }
+  drawLoopSettings();
   drawLooper();
-  if (s !== 'empty' && s !== 'stopped') animLooper();
+  if (loopRunning()) animLooper();
+}
+// Takte, BPM, Click, Quantisierung (ändern sich als Parameter, nicht als Looper-Zustand)
+function drawLoopSettings() {
+  const n = loopBars(), txt = n === 1 ? '1 Takt' : `${n} Takte`;
+  $('#lbarsval').textContent = txt; $('#llbarsv').textContent = txt;
+  for (const el of [$('#lbar'), $('#llbar')]) el.style.setProperty('--nb', n);
+  $('#llbpm').textContent = `${Math.round(loopBpm())} BPM`;
+  const click = values['looper.click'] === 'an', q = values['looper.quantize'] || 'aus';
+  $('#llclick').textContent = click ? 'Click an' : 'Click aus'; $('#llclick').classList.toggle('on', click);
+  $('#llq').textContent = 'Q ' + q; $('#llq').classList.toggle('on', q !== 'aus');
+  $('#lbm').disabled = $('#llbm').disabled = n <= 1;
+  $('#lbp').disabled = $('#llbp').disabled = n >= 32;
 }
 function drawLooper() {
   if (!loop) return;
-  const s = loop.state, el = loopPos(), sp = loopSpeed();
-  const spTxt = Math.abs(sp - 1) > 0.005 ? `  ·  ${sp.toFixed(2)}×` : '';
-  let frac = 0, t = '';
-  if (s === 'recording') { frac = Math.min(el / loop.max, 1); t = `● REC ${el.toFixed(1)} s`; }
-  else if (s === 'playing' || s === 'overdub') { frac = loop.length ? (el % loop.length) / loop.length : 0;
-    t = (s === 'overdub' ? '● DUB ' : '▶ ') + `${(el % loop.length).toFixed(1)} / ${loop.length.toFixed(1)} s` + spTxt; }
-  else if (s === 'armed') t = '● REC bereit';
-  $('#lbar div').style.width = (frac * 100) + '%';
-  $('#lbar div').style.background = s === 'recording' || s === 'overdub' ? 'var(--learn)' : s === 'playing' ? '#46a758' : 'var(--acc)';
+  const s = loop.state, p = loopPos(), L = loopBars() * BEATS;
+  let frac = 0, pos = '', beat = -1, mini = '';
+  if (s === 'countin') {
+    beat = Math.max(0, Math.floor(p + BEATS)); pos = `– ${BEATS - beat}`; mini = `● Vorzähler ${BEATS - beat}`;
+  } else if (loopRunning()) {
+    const bar = Math.floor(p / BEATS), bt = Math.floor(p % BEATS);
+    frac = p / L; beat = bt; pos = `${bar + 1}.${bt + 1}`;
+    mini = (s === 'playing' ? '▶ ' : '● ') + `${pos} / ${loopBars()}`;
+  } else {
+    pos = '1.1'; mini = s === 'stopped' ? `■ ${loopBars()} Takte bereit` : 'Looper leer';
+  }
+  const col = s === 'recording' || s === 'overdub' || s === 'countin' ? 'var(--learn)' : s === 'playing' ? '#46a758' : 'var(--acc)';
+  $('#lbar div').style.width = (frac * 100) + '%'; $('#lbar div').style.background = col;
   $('#lmbar div').style.width = (frac * 100) + '%';
-  $('#lmtxt').textContent = t || (s === 'stopped' ? `■ ${loop.length.toFixed(1)} s bereit` : 'Looper leer');
-  $('#ltext').textContent = LOOP_TXT[s] + (loop.length ? `  ·  Schleife ${loop.length.toFixed(1)} s, ${loop.notes} Noten` : '')
-    + (s === 'recording' || s === 'armed' ? `  ·  max. ${loop.max} s` : '');
+  $('#llbar div').style.width = (frac * 100) + '%';
+  $('#lmtxt').textContent = mini;
+  $('#llpos').textContent = pos;
+  $('#llstate').textContent = LOOP_SHORT[s] + (loop.notes ? ` · ${loop.notes} ${loop.notes === 1 ? 'Note' : 'Noten'}` : '');
+  [...$('#lldots').children].forEach((d, i) => d.classList.toggle('on', i === beat));
+  $('#ltext').textContent = LOOP_TXT[s] + (loop.notes ? `  ·  ${loop.notes} ${loop.notes === 1 ? 'Note' : 'Noten'}` : '')
+    + (loopRunning() && s !== 'countin' ? `  ·  Takt ${pos.replace('.', ', Schlag ')}` : '');
 }
-// Position wird im Browser aus Länge + Startzeit gerechnet: kein zusätzlicher Netzverkehr
 let loopAnim = false;
 function animLooper() {
   if (loopAnim) return; loopAnim = true;
-  const step = () => { if (!loop || loop.state === 'empty' || loop.state === 'stopped' || document.hidden) { loopAnim = false; return; }
+  const step = () => { if (!loopRunning() || document.hidden) { loopAnim = false; if (loop) drawLooper(); return; }
     drawLooper(); requestAnimationFrame(step); };
   requestAnimationFrame(step);
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden && loop) animLooper(); });
 for (const [id, cmd] of [['#lrec', 'record'], ['#lstop', 'stop'], ['#lplay', 'play'], ['#lclear', 'clear'],
-                         ['#lmrec', 'record'], ['#lmstop', 'stop'], ['#lmplay', 'play']])
+                         ['#lmrec', 'record'], ['#lmstop', 'stop'], ['#lmplay', 'play'],
+                         ['#llrec', 'record'], ['#llstop', 'stop'], ['#llplay', 'play']])
   $(id).onclick = () => post('/api/looper', {cmd});
-// Einstellbarer Bereich des Tempo-Reglers
+function setLoopParam(id, v) { values[id] = v; refresh(id); sendParam(id, v); }
+const addBars = d => setLoopParam('looper.bars', Math.max(1, Math.min(32, loopBars() + d)));
+$('#lbm').onclick = $('#llbm').onclick = () => addBars(-1);
+$('#lbp').onclick = $('#llbp').onclick = () => addBars(1);
+$('#llclick').onclick = () => setLoopParam('looper.click', values['looper.click'] === 'an' ? 'aus' : 'an');
+$('#llq').onclick = () => { const c = schema['looper.quantize'].choices, i = c.indexOf(values['looper.quantize']);
+  setLoopParam('looper.quantize', c[(i + 1) % c.length]); };
+// Einstellbarer Bereich des BPM-Reglers
 function showRange() {
-  const p = schema['looper.speed']; if (!p) return;
+  const p = schema['looper.bpm']; if (!p) return;
   for (const [id, v] of [['#lsmin', p.min], ['#lsmax', p.max]]) {
     const el = $(id); if (document.activeElement !== el) el.value = +v.toFixed(3); el.classList.remove('bad'); }
 }
 function sendRange() {
   const lo = parseFloat($('#lsmin').value.replace(',', '.')), hi = parseFloat($('#lsmax').value.replace(',', '.'));
-  const bad = !(lo >= 0.1 && hi <= 10 && hi > lo * 1.01);
+  const bad = !(lo >= 30 && hi <= 300 && hi > lo * 1.01);
   $('#lsmin').classList.toggle('bad', bad); $('#lsmax').classList.toggle('bad', bad);
-  if (!bad) post('/api/range', {id: 'looper.speed', min: lo, max: hi});
+  if (!bad) post('/api/range', {id: 'looper.bpm', min: lo, max: hi});
 }
 $('#lsmin').onchange = $('#lsmax').onchange = sendRange;
 function applySchema(p) { schema[p.id] = p; showRange(); refresh(p.id); }
 function buildTransport() {
   const el = $('#tpslots'); if (!ctrl || !ctrl.transport) return;
   el.innerHTML = '';
-  ['Record', 'Stop', 'Play'].forEach((name, i) => {
+  ['Record', 'Stop', 'Play', 'Takt +', 'Takt −'].forEach((name, i) => {
     const s = ctrl.transport[i], armed = ctrl.learn && ctrl.learn[0] === 'transport' && ctrl.learn[1] === i;
     const b = document.createElement('button');
     b.className = 'slot' + (armed ? ' armed' : '') + (s ? '' : ' unset');
@@ -684,6 +792,7 @@ function refresh(id) {
   if (e.slider && document.activeElement !== e.slider) e.slider.value = Math.round(toNorm(p, v) * 1000);
   if (e.seg) for (const b of e.seg.children) b.classList.toggle('on', b.dataset.v === v);
   if (ctrl && ctrl.banks[ctrl.bank].params.includes(id)) { refreshKnobVals(); refreshLive(id); }
+  if (id.startsWith('looper.') && loop) { drawLoopSettings(); drawLooper(); }
 }
 
 function refreshMidi() {

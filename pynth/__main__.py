@@ -55,7 +55,7 @@ def log_startup(stage: str, t_import: float):
 def save_state(state_file, params):
     try:
         st = nest(params.values, params.preset_name)
-        st["ranges"] = params.ranges()                 # z.B. eingestellter Looper-Tempo-Bereich
+        st["ranges"] = params.ranges()                 # z.B. eingestellter BPM-Bereich
         save_json(state_file, st)
     except OSError as e:
         log.warning("Kann %s nicht schreiben: %s", state_file, e)
@@ -230,7 +230,13 @@ def run(args, led, t_import):
 
     from .controller import Controller
     controller = Controller(params, data / "controller.json")
-    controller.on_transport = engine.looper_cmd        # Record/Stop/Play -> Looper
+    def transport(action: str):                        # Record/Stop/Play -> Looper, Vor/Zurueck -> Takte
+        if action in ("bar_add", "bar_remove"):
+            params.set("looper.bars", params.values["looper.bars"] + (1 if action == "bar_add" else -1),
+                       source="midi")
+        else:
+            engine.looper_cmd(action)
+    controller.on_transport = transport
     midi = None
     if not args.no_midi:
         from .midi import MidiManager

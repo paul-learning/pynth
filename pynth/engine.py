@@ -43,6 +43,15 @@ LADDER_GAIN = 1.3         # 24 dB/Okt. nimmt mehr Obertoene weg: Pegel wie beim 
 HEADROOM = 0.25           # Pegel pro Stimme vor dem Filter; 8 Stimmen bleiben unter dem Limiter
 FENV_OCT = 4.0            # filter.env_amount +-1 = +-4 Oktaven
 EXP_K = 6.9   # exp(-6.9) ~ -60 dB: Decay/Release sind "fertig" nach der eingestellten Zeit
+SPLIT_GRID = 32           # Schleifen-Noten landen auf 32 Samples (0,7 ms) genau statt auf dem Blockanfang
+CLICK_GAIN = 0.5          # Click-Lautstaerke 1 -> Spitze 0,5 (betonte Eins), andere Schlaege leiser
+CLICK_S = 0.03            # Dauer eines Clicks
+
+
+def _click_sound(sr: int, freq: float, amp: float) -> np.ndarray:
+    t = np.arange(int(CLICK_S * sr)) / sr
+    env = np.exp(-t / (CLICK_S / 5)) * np.minimum(1.0, t * sr / 16)   # 16 Samples Anstieg: kein Knacks
+    return amp * env * np.sin(2 * np.pi * freq * t)
 
 
 class Voice:
@@ -100,6 +109,8 @@ class Engine:
         self._age = 0
         self._ramp_cache: dict[int, np.ndarray] = {}
         self.looper = Looper(samplerate, notify=lambda info: params.broadcast("looper", info))
+        self._click_snd = (_click_sound(samplerate, 1000.0, 0.6), _click_sound(samplerate, 1600.0, 1.0))
+        self._click_tail: list = []
         self.stats = {"load": 0.0, "voices": 0, "peak": 0.0, "blocks": 0, "underruns": 0}
 
     # ---------- thread-sichere Steuerung (MIDI-Thread, Web-Thread) ----------
@@ -311,8 +322,53 @@ class Engine:
         t0 = time.perf_counter()
         p = dict(self.params.values)        # Schnappschuss: Werte aendern sich nicht mitten im Block
         self._handle_events(p)
-        for kind, note, vel in self.looper.tick(n, p.get("looper.speed", 1.0)):     # Schleife: Noten wie live gespielt
-            self._apply(kind, note, vel, p, src=1)
+        click_on = p.get("looper.click") == "an"
+        loop_ev, clicks = self.looper.tick(n, p.get("looper.bpm", 120.0), p.get("looper.bars", 4),
+                                           p.get("looper.quantize", "aus"), click_on)
+        if not loop_ev:
+            out = self._render(n, p)
+        else:
+            # Schleifen-Noten sample-genau (auf SPLIT_GRID gerundet): Block an den Noten teilen
+            q = [((off // SPLIT_GRID) * SPLIT_GRID, kind, note, vel) for off, kind, note, vel in loop_ev]
+            bounds = sorted({0, n} | {a for a, *_ in q})
+            parts = []
+            for a, b in zip(bounds, bounds[1:]):
+                for at, kind, note, vel in q:
+                    if at == a:
+                        self._apply(kind, note, vel, p, src=1)
+                parts.append(self._render(b - a, p))
+            out = np.concatenate(parts)
+        if clicks or self._click_tail:
+            out += self._click(n, clicks, p.get("looper.click_level", 0.5))
+        out = np.tanh(out)                  # weicher Limiter statt hartem Clipping
+
+        dur = n / self.sr
+        st = self.stats
+        st["load"] = 0.8 * st["load"] + 0.2 * ((time.perf_counter() - t0) / dur)
+        st["voices"] = sum(1 for v in self.voices if v.active)
+        st["peak"] = float(np.max(np.abs(out))) if n else 0.0
+        st["blocks"] += 1
+        return out.astype(np.float32)
+
+    def _click(self, n: int, clicks, level: float) -> np.ndarray:
+        """Metronom: kurze Sinus-Pieps, betonte Eins hoeher und lauter. Laeuft ueber Blockgrenzen."""
+        buf = np.zeros(n)
+        tails, self._click_tail = self._click_tail, []
+        for snd, k in tails:
+            m = min(n, len(snd) - k)
+            buf[:m] += snd[k:k + m]
+            if k + m < len(snd):
+                self._click_tail.append((snd, k + m))
+        for off, accent in clicks:
+            snd = self._click_snd[1 if accent else 0]
+            m = min(n - off, len(snd))
+            buf[off:off + m] += snd[:m]
+            if m < len(snd):
+                self._click_tail.append((snd, m))
+        return buf * (CLICK_GAIN * level)
+
+    def _render(self, n: int, p) -> np.ndarray:
+        """Ein Stueck Audio (Stimmen, Filter, Effekte), noch ohne Limiter."""
         sr = self.sr
         ramp = self._ramp(n)
 
@@ -371,7 +427,7 @@ class Engine:
                 mix = np.tanh(mix * pre) * makeup
             q = 0.707 * 20.0 ** res
             out = self._filter_np(mix, n, prev, cutoff, q, lfo_f, depth, fenv)
-        return self._post(out, p, n, ramp, lfo, target, depth, t0)
+        return self._post(out, p, n, ramp, lfo, target, depth)
 
     def _filter_c(self, mix, n, ramp, prev, cutoff, res, pre, makeup, lfo, depth, fenv=None):
         """4-Pol-Ladder mit Saettigung, Cutoff pro Sample (weich auch bei voller LFO-Tiefe)."""
@@ -411,7 +467,7 @@ class Engine:
         self.filter_zi = zi
         return out
 
-    def _post(self, out, p, n, ramp, lfo, target, depth, t0):
+    def _post(self, out, p, n, ramp, lfo, target, depth):
         sr = self.sr
 
         # Master-Lautstaerke (gerampt gegen Zipper) + Tremolo
@@ -433,12 +489,4 @@ class Engine:
         if p["fx.reverb_mix"] > 0:
             out = out + p["fx.reverb_mix"] * self.reverb.process(out, p["fx.reverb_size"])
 
-        out = np.tanh(out)                  # weicher Limiter statt hartem Clipping
-
-        dur = n / sr
-        st = self.stats
-        st["load"] = 0.8 * st["load"] + 0.2 * ((time.perf_counter() - t0) / dur)
-        st["voices"] = sum(1 for v in self.voices if v.active)
-        st["peak"] = float(np.max(np.abs(out))) if n else 0.0
-        st["blocks"] += 1
-        return out.astype(np.float32)
+        return out

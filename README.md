@@ -180,7 +180,7 @@ Alle Bänke starten leer und werden selbst belegt:
   "aus" sendet oder pro Druck zwischen an/aus wechselt (Toggle). CC 0 direkt nach einem
   Program Change (PRESET-Taste am M25) wird ignoriert. Unter "Controller einrichten"
   anlernbar, Rechtsklick schaltet sie ab. Fest angelernte Pads/Knobs haben Vorrang.
-  Stop/Play/Record steuern den Looper (siehe unten).
+  Stop/Play/Record und Vor/Zurück steuern den Looper (siehe unten).
 * **Controller-Presets**: Viele Controller (auch der M25) senden je nach Preset andere CCs/Noten.
   Die Knobs/Pads gelten für das Preset, auf dem sie angelernt wurden. Nach einem Preset-Wechsel
   am Controller "Einrichten" neu durchlaufen. Dreht man bei "L" einen Knob, der kein Bank-Knob
@@ -299,30 +299,48 @@ die Dienst-Datei, die sudo-Regel, `requirements.txt` oder das WLAN-Skript, steht
 SSH noch ausführen muss. Die PIN ist nur als Hash in `pin.json` gespeichert (nicht im Repo); nach
 5 falschen Versuchen ist das Update 5 Minuten gesperrt. Das sudo-Passwort geht nie über den Browser.
 
-## Looper (Record / Stop / Play)
+## Looper (Takte, BPM, Click)
 
 Der Looper nimmt auf, **was** du spielst (Noten, Anschlag, Sustain-Pedal), nicht den Klang.
 Beim Abspielen laufen die Noten wieder durch die Engine, daher wirken alle Regler live auf
 die Schleife (Filter, Hüllkurve, LFO, Effekte …). Kostet praktisch keine CPU.
 
-| Taste | leer / gestoppt | Aufnahme | Wiedergabe | Overdub |
-|---|---|---|---|---|
-| **Record** | scharf, Aufnahme startet mit der ersten Note (alte Schleife wird ersetzt) | fertig + sofort abspielen | Overdub: dazuspielen | Overdub fertig |
-| **Stop** | – | fertig (Schleife bleibt) | aus | aus |
-| **Play** | Schleife von vorn | fertig + sofort abspielen | von vorn | Overdub fertig |
+Die Schleife ist immer eine feste Anzahl **Takte** (4/4) lang, im Tempo **BPM**.
 
-* Die Schleife ist so lang wie von der ersten Note bis zum Druck auf Stop/Play/Record,
-  höchstens 60 s (`MAX_SECONDS` in `pynth/looper.py`), danach stoppt die Aufnahme selbst.
+| Taste | leer / gestoppt | Vorzähler | Aufnahme | Wiedergabe | Overdub |
+|---|---|---|---|---|---|
+| **Record** | ein Takt Vorzähler, dann Aufnahme (alte Schleife wird ersetzt) | abbrechen | weiter aufnehmen (Overdub) | Overdub: dazuspielen | Overdub fertig |
+| **Stop** | – | abbrechen | fertig (Schleife bleibt) | aus | aus |
+| **Play** | Schleife von vorn (leer: nur Click) | abbrechen + abspielen | fertig, läuft im Takt weiter | von vorn | Overdub fertig |
+| **Vor / Zurück** | Takt dazu / weg (1–32) | | | | |
+
+* Die Aufnahme läuft genau über alle Takte, danach spielt die Schleife von selbst weiter.
+  Noten bis eine Sechzehntel vor der Eins (im Vorzähler) zählen als „auf der Eins“.
+* **Ohne Vorzähler**: Play bei leerem Looper startet nur den Click, Record nimmt dann sofort im
+  Takt auf (Overdub).
+* **Takte** (Vor/Zurück am Controller, „Takt −/+“ in der Web-UI): auch während die Schleife läuft.
+  Weniger Takte löschen nichts: die Noten dahinter sind stumm und kommen mit mehr Takten wieder.
+* **BPM** (Regler „Looper → BPM“, per „L“ auf einen Knob legbar): ändert das Tempo, auch während
+  die Schleife läuft, die Noten bleiben auf ihren Schlägen und die Tonhöhe gleich. Der Bereich
+  des Reglers ist in der Looper-Karte einstellbar („BPM-Regler von … bis …“, 30–300, Standard
+  60–180: am Knob etwa 1 BPM pro Schritt) und wird in `state.json` gespeichert. Ein Knob, der
+  vorher auf dem alten „Tempo“ (×) lag, steuert jetzt BPM.
+* **Click** (Metronom): Klick auf jeden Schlag, die Eins höher und lauter. An/Aus und Lautstärke
+  im Bereich „Looper“, beides per „L“ auf einen Knob legbar. Der Vorzähler klickt immer.
+* **Quantisierung**: rückt beim Aufnehmen jeden Anschlag aufs Raster (aus / 1/4 / 1/8 / 1/16),
+  die Notenlänge bleibt. Live hört man sofort, was man spielt. Auf einem Knob ist das ein
+  Stufenregler: ganz links = aus, dann 1/4, 1/8, 1/16.
+* BPM, Takte, Click und Quantisierung gehören nicht zum Klang: Preset laden/speichern lässt sie in Ruhe.
+* Schleifen-Noten und Click werden sample-genau gesetzt (nicht nur am Anfang eines Audio-Blocks).
 * Live gespielte und geloopte Noten haben getrennte Stimmen, gleiche Töne stören sich nicht.
   Alle teilen sich die 8 Stimmen.
-* **Tasten am Controller**: Web-UI → Looper → "Tasten am Controller anlernen": Feld anklicken,
-  Taste drücken. Eine Taste, die vorher als Pad die Bank umgeschaltet hat, wird dabei als Pad
-  entfernt. Tasten, die MIDI Machine Control (MMC-Sysex) senden, funktionieren ohne Anlernen.
-* **Tempo** (Regler "Looper → Tempo", 0,25× bis 5×, Doppelklick = 1×): spielt die Schleife
-  schneller oder langsamer ab, die Tonhöhe bleibt gleich. Der Bereich des Reglers ist in der
-  Looper-Karte einstellbar ("Tempo-Regler von … bis …", erlaubt 0,1× bis 10×) und gilt für Slider,
-  Knob und Live-Ansicht. Er wird in `state.json` gespeichert. Per "L" auf einen Knob legbar wie jeder
-  Regler. Gehört nicht zum Klang: Preset laden/speichern lässt das Tempo in Ruhe.
+* **Tasten am Controller**: Web-UI → Looper → "Tasten am Controller anlernen" (Record, Stop, Play,
+  Takt +, Takt −): Feld anklicken, Taste drücken. Eine Taste, die vorher als Pad die Bank
+  umgeschaltet hat, wird dabei als Pad entfernt. Tasten, die MIDI Machine Control (MMC-Sysex)
+  senden, funktionieren ohne Anlernen (Vor = Takt +, Zurück = Takt −).
+* **Live-Ansicht**: oben ein Looper-Streifen mit Record/Stop/Play, Position (Takt.Schlag), den
+  vier Schlägen, einem Balken mit Takt-Strichen, Takte −/+, BPM, Click und Quantisierung
+  (antippen schaltet um). Hochkant stehen die Einstellungen in einer Zeile darunter.
 * Panic stoppt auch die Wiedergabe. Die Schleife wird nicht gespeichert (weg nach Neustart).
 
 ## Dateien
@@ -333,7 +351,7 @@ pynth/dsp.py      Oszillatoren, LFO, Biquad, Delay-/Comb-/Allpass-Linien, Hall
 pynth/engine.py   Voices, ADSR, Noise, Signalkette
 pynth/midi.py     MIDI-Eingang, Hotplug, CC-Mapping, Learn
 pynth/controller.py Knob-Bänke, Pads, Soft-Takeover, Mod-Rad, Looper-Tasten
-pynth/looper.py   MIDI-Looper (Aufnahme, Wiedergabe, Overdub)
+pynth/looper.py   MIDI-Looper (Takte, Vorzähler, Overdub, Quantisierung, Click-Raster)
 pynth/web.py      HTTP-API + SSE
 pynth/leds.py     Status-LED (startet / spielbereit / Fehler)
 pynth/system.py   Ausschalten / Neustart (sudo-Regel: deploy/install-system.sh)

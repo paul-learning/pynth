@@ -14,7 +14,7 @@ import time
 from collections import deque
 from pathlib import Path
 
-from .params import RENAMED
+from .params import RENAMED_CONTROLS as RENAMED
 from .storage import load_json, save_json
 
 log = logging.getLogger("pynth.midi")
@@ -22,8 +22,10 @@ log = logging.getLogger("pynth.midi")
 IGNORE_PORTS = ("Midi Through", "RtMidi")
 SKIP_TYPES = ("clock", "active_sensing")
 CONTINUOUS = ("control_change", "pitchwheel", "aftertouch", "polytouch")   # im Monitor gedrosselt
-# MIDI Machine Control (Sysex F0 7F <id> 06 <cmd> F7), senden viele Transport-Tasten ab Werk
-MMC = {1: "stop", 2: "play", 3: "play", 6: "record", 9: "stop"}
+# MIDI Machine Control (Sysex F0 7F <id> 06 <cmd> F7), senden viele Transport-Tasten ab Werk.
+# Vor (Fast Forward) / Zurueck (Rewind) = Looper-Takt dazu / weg.
+MMC = {1: "stop", 2: "play", 3: "play", 4: "bar_add", 5: "bar_remove", 6: "record", 9: "stop"}
+MMC_TEXT = {"bar_add": "Takt +", "bar_remove": "Takt −"}
 
 
 class MidiManager:
@@ -146,7 +148,7 @@ class MidiManager:
             elif t == "sysex":
                 d = msg.data
                 if ctl and len(d) >= 4 and d[0] == 0x7F and d[2] == 0x06 and d[3] in MMC:
-                    self._show(f"MMC {MMC[d[3]].capitalize()} -> Looper")
+                    self._show(f"MMC {MMC_TEXT.get(MMC[d[3]], MMC[d[3]].capitalize())} -> Looper")
                     ctl.transport(MMC[d[3]])
             elif t == "program_change":
                 ch = msg.channel + 1

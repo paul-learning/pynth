@@ -13,7 +13,7 @@ controller.json (Nutzerdaten, nicht im Repo). Fehlt die Datei, gelten die Defaul
 from __future__ import annotations
 
 import copy
-from .params import RENAMED
+from .params import RENAMED_CONTROLS as RENAMED
 from .storage import load_json, save_json
 import logging
 import time
@@ -27,7 +27,7 @@ PICKUP_TOLERANCE = 3 / 127      # so nah am Wert gilt ein Knob als "abgeholt"
 LEARN_MIN_MOVE = 4              # Knob-Learn: erst nach so vielen Schritten Bewegung (Potis zittern um 1-2)
 TAKEOVER_MODES = ("jump", "pickup")
 RELEASE_WINDOW = 0.8            # Weiter-Taste: Loslassen so kurz nach dem Druecken = kein neuer Druck
-TRANSPORT = ("record", "stop", "play")     # Looper-Tasten
+TRANSPORT = ("record", "stop", "play", "bar_add", "bar_remove")    # Looper-Tasten (Takt +/-: Vor/Zurueck)
 PC_CC_GAP = 0.3                 # CC 0 direkt nach Program Change ist Bank-Select des Presets, kein Pad
 
 DEFAULT_CONFIG = {
@@ -39,7 +39,7 @@ DEFAULT_CONFIG = {
     # Weiter-Taste: jeder Druck schaltet zur naechsten Bank (1 -> 2 -> 3 -> 4 -> 1).
     # Fuer Controller, deren Pads alle dasselbe senden (Graphite M25: Note 0 bzw. CC 0).
     "next_bank": ["note:*:0", "cc:*:0"],
-    # Looper-Tasten Record, Stop, Play (anlernbar). MMC (Sysex) geht immer, ohne Anlernen.
+    # Looper-Tasten Record, Stop, Play, Takt +, Takt - (anlernbar). MMC (Sysex) geht immer, ohne Anlernen.
     "transport": [None] * len(TRANSPORT),
     # "jump": Knob setzt sofort seinen Wert (voller Weg, kann nach Bankwechsel springen)
     # "pickup": Soft-Takeover, Knob greift erst, wenn er den aktuellen Wert ueberstreicht
@@ -76,7 +76,7 @@ class Controller:
         self._nb_state: dict[str, dict] = {}                 # Weiter-Taste: letzter Zustand je Eingang
         self._last_pc = 0.0
         self.on_learned = None                               # Callback(spec): z.B. alte Direkt-Belegung loeschen
-        self.on_transport = None                             # Callback("record"|"stop"|"play"): Looper
+        self.on_transport = None                             # Callback(eins aus TRANSPORT): Looper
         self._load()
 
     # ----------------------------- Datei -----------------------------
