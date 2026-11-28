@@ -24,8 +24,10 @@ Tasten (Controller oder Web-UI):
           nichts weg: die Noten dahinter sind nur stumm und kommen mit mehr Takten wieder.
   Clear   (nur Web-UI) Schleife loeschen
 
-Quantisierung (looper.quantize): Anschlaege werden beim Aufnehmen aufs Raster gerueckt,
-das Loslassen um denselben Betrag (die Notenlaenge bleibt). Live hoert man sofort.
+Quantisierung (looper.quantize) wirkt beim Abspielen auf die ganze Schleife: gespeichert
+werden die Original-Zeiten, gespielt wird eine aufs Raster gerueckte Kopie (`_play`). Der
+Anschlag rueckt aufs Raster, das Loslassen um denselben Betrag (die Notenlaenge bleibt).
+Regler drehen wirkt sofort auf alles, "aus" bringt das Original-Timing zurueck.
 
 Alles hier laeuft im Audio-Thread (Engine.render), Befehle kommen ueber die
 Event-Queue der Engine.
@@ -47,7 +49,8 @@ class Looper:
     def __init__(self, samplerate: int, notify=None):
         self.sr = samplerate
         self.notify = notify            # Callback(info) bei Zustandswechsel und Schleifenanfang (Web-UI)
-        self.events: list[tuple] = []   # sortiert: (t, seq, kind, note, vel), t in Schlaegen
+        self.events: list[tuple] = []   # Original: (t, seq, kind, note, vel, nid), t in Schlaegen
+        self._play: list[tuple] = []    # gespielt: events quantisiert, sortiert (nid = seq des Anschlags)
         self.pending: list[tuple] = []  # Overdub-Noten, kommen beim naechsten Durchlauf dazu
         self._early: list[tuple] = []   # im Vorzaehler knapp vor der Eins gespielt
         self.bars = 4
@@ -57,8 +60,8 @@ class Looper:
         self.state = "empty"
         self._idx = 0                   # naechstes abzuspielendes Ereignis
         self._seq = 0
-        self._held: dict[int, float] = {}       # gedrueckte Noten -> Verschiebung durch Quantisierung
-        self._sustained: dict[int, float] = {}  # losgelassen, aber vom Pedal gehalten
+        self._held: dict[int, tuple] = {}       # gedrueckte Noten -> (nid, Verschiebung im Vorzaehler)
+        self._sustained: dict[int, tuple] = {}  # losgelassen, aber vom Pedal gehalten
         self._pedal = False
         self._sounding: set[int] = set()        # von der Schleife angeschlagen, noch nicht losgelassen
         self._skip: set[int] = set()            # seq: beim naechsten Durchlauf einmal auslassen
@@ -104,7 +107,9 @@ class Looper:
             elif s == "countin":                    # nochmal Record = abbrechen
                 self._idle()
             elif s == "recording":                  # weiter aufnehmen, auch ueber das Ende hinaus
-                self._idx = bisect.bisect_left(self.events, (self.pos,))
+                self.events.sort()
+                self._rebuild()
+                self._idx = bisect.bisect_left(self._play, (self.pos,))
                 self._set("overdub")
             elif s == "playing":
                 self._held.clear()
@@ -119,6 +124,7 @@ class Looper:
             elif s == "recording":
                 self._close_held(self.events, self.pos)
                 self.events.sort()
+                self._rebuild()
                 self._idle()
             elif running:
                 if s == "overdub":
@@ -130,7 +136,8 @@ class Looper:
             if s == "recording":                    # fertig, Schleife laeuft im Takt weiter
                 self._close_held(self.events, self.pos)
                 self.events.sort()
-                self._idx = bisect.bisect_left(self.events, (self.pos,))
+                self._rebuild()
+                self._idx = bisect.bisect_left(self._play, (self.pos,))
                 self._set("playing")
             elif s == "overdub":
                 self._finish_overdub()
@@ -143,22 +150,22 @@ class Looper:
                 self._set("playing")
                 return s == "playing"               # Neustart von vorn: alte Noten aus
         elif cmd == "clear":
-            self.events, self.pending, self._early = [], [], []
+            self.events, self.pending, self._early, self._play = [], [], [], []
             self._sounding.clear()
             self._skip.clear()
             self._idle()
             return running
         return False
 
-    def _add(self, lst, t, kind, note, vel=0):
+    def _add(self, lst, t, kind, note, vel=0, nid=None):
         self._seq += 1
-        lst.append((t, self._seq, kind, note, vel))
+        lst.append((t, self._seq, kind, note, vel, self._seq if nid is None else nid))
         return self._seq
 
     def _close_held(self, lst, t):
         """Noch gedrueckte / vom Pedal gehaltene Noten bei t loslassen."""
-        for n in sorted(set(self._held) | set(self._sustained)):
-            self._add(lst, t, "off", n)
+        for n, (nid, _) in sorted({**self._held, **self._sustained}.items()):
+            self._add(lst, t, "off", n, nid=nid)
         self._held.clear()
         self._sustained.clear()
 
@@ -170,7 +177,31 @@ class Looper:
         if self.pending:
             self.events = sorted(self.events + self.pending)
             self.pending = []
-            self._idx = bisect.bisect_left(self.events, (self.pos,))
+            self._rebuild()
+            self._idx = bisect.bisect_left(self._play, (self.pos,))
+
+    def _qtime(self, t: float) -> float:
+        return round(t / self.grid) * self.grid if self.grid else t
+
+    def _rebuild(self):
+        """Gespielte Fassung neu: Anschlaege aufs Raster, Loslassen um denselben Betrag."""
+        L = self.length
+        if not self.grid:
+            self._play = list(self.events)
+            return
+        delta = {e[1]: self._qtime(e[0]) - e[0] for e in self.events if e[2] == "on"}
+        play = []
+        for e in self.events:
+            t = e[0]
+            if t < L:                               # hinter dem Ende (weniger Takte): bleibt stumm
+                t += delta.get(e[5], 0.0)
+                if t >= L:
+                    t -= L
+                elif t < 0:
+                    t += L
+            play.append((t,) + e[1:])
+        play.sort()
+        self._play = play
 
     # ------------------------------ Eingang ------------------------------
     def capture(self, kind: str, note: int, val):
@@ -180,37 +211,32 @@ class Looper:
             if self.pos < -COUNT_IN_EARLY:
                 return                              # zu frueh: nur live spielen
             lst, t = self._early, 0.0
-            delta = -self.pos                       # knapp vor der Eins -> auf die Eins
+            shift = -self.pos                       # knapp vor der Eins -> auf die Eins
         elif s in ("recording", "overdub"):
             lst = self.events if s == "recording" else self.pending
-            t, delta = self.pos, 0.0
+            t, shift = self.pos, 0.0
         else:
             return
         L = self.length
         if kind == "on":
-            if self.grid and s != "countin":
-                q = round(t / self.grid) * self.grid
-                delta = q - t
-                t = q
-            if t >= L:                              # aufs Raster nach dem Ende -> Anfang
-                t -= L
-                self._skip.add(self._seq + 1)       # gleich am Anfang nicht nochmal (klingt schon live)
             self._sustained.pop(note, None)
-            self._held[note] = delta
-            self._add(lst, t, "on", note, val)
+            seq = self._add(lst, t, "on", note, val)
+            self._held[note] = (seq, shift)
+            if self.grid and self._qtime(t) >= L:   # rueckt auf den Anfang: dort gleich nicht
+                self._skip.add(seq)                 # nochmal anschlagen (klingt schon live)
         elif kind == "off":
             if note not in self._held:
                 return                              # vor der Aufnahme angeschlagen
-            delta = self._held.pop(note)
+            nid, shift = self._held.pop(note)
             if self._pedal:
-                self._sustained[note] = delta       # Pedal haelt: Note-Off kommt beim Loslassen
+                self._sustained[note] = (nid, shift)    # Pedal haelt: Note-Off kommt beim Loslassen
             else:
-                self._add(lst, (self.pos + delta) % L if s != "countin" else 0.0, "off", note)
+                self._add(lst, 0.0 if s == "countin" else (self.pos + shift) % L, "off", note, nid=nid)
         elif kind == "pedal":
             self._pedal = bool(val)
             if not val:
-                for n, d in sorted(self._sustained.items()):
-                    self._add(lst, (self.pos + d) % L if s != "countin" else 0.0, "off", n)
+                for n, (nid, d) in sorted(self._sustained.items()):
+                    self._add(lst, 0.0 if s == "countin" else (self.pos + d) % L, "off", n, nid=nid)
                 self._sustained.clear()
 
     # ------------------------------ Abspielen ------------------------------
@@ -223,20 +249,29 @@ class Looper:
           Clicks [(sample, betont)]: Metronom-Schlaege (immer im Vorzaehler, sonst wenn click)
         """
         self.bpm = max(1.0, float(bpm))
-        self.grid = QUANT_GRID.get(quantize, 0.0)
         out: list[tuple] = []
+        grid = QUANT_GRID.get(quantize, 0.0)
+        if grid != self.grid:                       # Raster gedreht: ganze Schleife neu rechnen
+            self.grid = grid
+            self._rebuild()
+            for note in sorted(self._sounding):     # sonst haengt eine Note, deren Ende verrutscht
+                out.append((0, "off", note, 0))
+            self._sounding.clear()
+            if self.state != "recording":
+                self._idx = bisect.bisect_left(self._play, (self.pos,))
         clicks: list[tuple] = []
         bars = max(1, min(MAX_BARS, int(bars)))
         s = self.state
         if bars != self.bars:
             self.bars = bars
+            self._rebuild()
             if s in ("recording", "playing", "overdub") and self.pos >= self.length:
                 p = self.pos % self.length          # weniger Takte: Position springt nach vorn
                 self.pos = 0.0
                 self._wrap(out, 0)
                 self.pos = p
             if self.state != "recording":
-                self._idx = bisect.bisect_left(self.events, (self.pos,))
+                self._idx = bisect.bisect_left(self._play, (self.pos,))
             s = self.state
         rate = self.bpm / 60.0 / self.sr            # Schlaege pro Sample
         adv = n * rate
@@ -249,9 +284,10 @@ class Looper:
             done = -t0                              # bis zur Eins verbrauchte Schlaege
             self.events, self.pending = sorted(self._early), []
             self._early = []
+            self._rebuild()
             self._sounding.clear()
             self._skip.clear()
-            self._idx = len(self.events)            # Aufnahme: nichts abspielen
+            self._idx = len(self._play)             # Aufnahme: nichts abspielen
             self.pos = 0.0
             self._set("recording")
             self._run(adv - done, done, rate, n, False, click, out, clicks)
@@ -279,9 +315,9 @@ class Looper:
             if click:
                 self._clicks(t, end, off, rate, n, clicks)
             if play:
-                ev = self.events
+                ev = self._play
                 while self._idx < len(ev) and ev[self._idx][0] < end:
-                    et, seq, kind, note, vel = ev[self._idx]
+                    et, seq, kind, note, vel, _ = ev[self._idx]
                     self._idx += 1
                     if seq in self._skip:
                         self._skip.discard(seq)
@@ -308,12 +344,13 @@ class Looper:
         if self.state == "recording":               # erster Durchlauf fertig: ab jetzt abspielen
             self._close_held(self.events, L - 1e-6)
             self.events.sort()
+            self._rebuild()
             self.state = "playing"
         self._merge()
         self._idx = 0
         # Noten, deren Loslassen hinter dem (gekuerzten) Ende liegt, sonst haengen sie
         for note in sorted(self._sounding):
-            first = next((e for e in self.events if e[3] == note and e[0] < L), None)
+            first = next((e for e in self._play if e[3] == note and e[0] < L), None)
             if first is None or first[2] == "on":
                 out.append((sample, "off", note, 0))
                 self._sounding.discard(note)
